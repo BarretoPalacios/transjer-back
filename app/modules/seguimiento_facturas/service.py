@@ -1,0 +1,752 @@
+from typing import List, Optional, Dict, Any, Tuple
+from enum import Enum
+from bson import ObjectId
+from decimal import Decimal
+from datetime import datetime, date, timedelta , time
+from app.core.database import get_database
+from app.modules.seguimiento_facturas.model import FacturacionGestion
+from app.modules.seguimiento_facturas.schema import (
+    FacturacionGestionCreate,
+    FacturacionGestionUpdate,
+    FacturacionGestionFilter,
+    FacturacionGestionResponse,
+    EstadoPagoNeto,
+    EstadoDetraccion,
+    PrioridadPago
+)
+import pandas as pd
+from io import BytesIO
+import logging
+import json
+from math import ceil
+import re
+
+logger = logging.getLogger(__name__)
+
+class FacturacionGestionService:
+    def __init__(self, db):
+        self.db = db
+        self.collection = db["facturacion_gestion"]
+        self.facturas_collection = db["facturas"]
+    
+    def create_gestion(self, gestion_data: dict) -> dict:
+        """Crear nueva gestión de facturación"""
+        try:
+            # 1️⃣ Verificar que la factura existe
+            factura = self.facturas_collection.find_one(
+                {"codigo_factura": gestion_data["codigo_factura"]}
+            )
+            if not factura:
+                raise ValueError(
+                    f"La factura {gestion_data['codigo_factura']} no existe"
+                )
+            
+            # 2️⃣ Verificar que no existe gestión para esta factura
+            existing_gestion = self.collection.find_one({
+                "codigo_factura": gestion_data["codigo_factura"]
+            })
+            if existing_gestion:
+                raise ValueError(
+                    f"Ya existe gestión para la factura {gestion_data['codigo_factura']}"
+                )
+            
+            # 3️⃣ Validar montos
+            if gestion_data.get("monto_neto", Decimal("0")) <= Decimal("0"):
+                raise ValueError("El monto neto debe ser mayor a cero")
+            
+            # Calcular detracción si no viene especificada
+            if gestion_data.get("monto_detraccion") is None:
+                tasa = gestion_data.get("tasa_detraccion", Decimal("4.0"))
+                monto_neto = gestion_data.get("monto_neto", Decimal("0"))
+                gestion_data["monto_detraccion"] = (monto_neto * tasa) / Decimal("100")
+            
+            # 4️⃣ Establecer estado de detracción basado en monto
+            if gestion_data.get("monto_detraccion", Decimal("0")) < Decimal("400"):
+                gestion_data["estado_detraccion"] = EstadoDetraccion.NO_APLICA
+            
+            # 5️⃣ Crear modelo
+            gestion_data["ultima_actualizacion"] = datetime.now()
+            gestion_model = FacturacionGestion(**gestion_data)
+            
+            # 6️⃣ Insertar en base de datos
+            result = self.collection.insert_one(
+                gestion_model.model_dump(by_alias=True)
+            )
+            
+            # 7️⃣ Retornar creado
+            created_gestion = self.collection.find_one(
+                {"_id": result.inserted_id}
+            )
+            return self._format_gestion_response(created_gestion)
+            
+        except Exception as e:
+            logger.error(f"Error al crear gestión de facturación: {str(e)}")
+            raise
+    
+    def get_gestion_by_id(self, gestion_id: str) -> Optional[dict]:
+        """Obtener gestión por ID"""
+        try:
+            if not ObjectId.is_valid(gestion_id):
+                return None
+            
+            gestion = self.collection.find_one({"_id": ObjectId(gestion_id)})
+            if gestion:
+                return self._format_gestion_response(gestion)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestión: {str(e)}")
+            return None
+    
+    def get_gestion_by_codigo_factura(self, codigo_factura: str) -> Optional[dict]:
+        """Obtener gestión por código de factura"""
+        try:
+            gestion = self.collection.find_one({"codigo_factura": codigo_factura})
+            if gestion:
+                return self._format_gestion_response(gestion)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestión por código de factura: {str(e)}")
+            return None
+    
+    def get_all_gestiones(
+        self,
+        filter_params: Optional[FacturacionGestionFilter] = None,
+        page: int = 1,
+        page_size: int = 10
+    ) -> dict:
+        """Obtener todas las gestiones con filtros extendidos y paginación"""
+        try:
+            query = self._build_query(filter_params)
+            
+            total = self.collection.count_documents(query)
+            skip = (page - 1) * page_size
+            
+            gestiones = list(
+                self.collection.find(query)
+                .sort("fecha_probable_pago", 1)
+                .skip(skip)
+                .limit(page_size)
+            )
+            
+            formatted_gestiones = [self._format_gestion_response(g) for g in gestiones]
+            
+            total_pages = ceil(total / page_size) if page_size > 0 else 0
+            
+            return {
+                "items": formatted_gestiones,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestiones: {str(e)}")
+            raise
+    
+    def _build_query(self, filter_params: Optional[FacturacionGestionFilter]) -> dict:
+        """Construir query de MongoDB con todos los filtros"""
+        query = {}
+        
+        if not filter_params:
+            return query
+        
+        # Filtros básicos
+        if filter_params.codigo_factura:
+            query["codigo_factura"] = safe_regex(filter_params.codigo_factura)
+        
+        if filter_params.numero_factura:
+            query["datos_completos.numero_factura"] = safe_regex(filter_params.numero_factura)
+        
+        # Estados y prioridad
+        if filter_params.estado_detraccion:
+            query["estado_detraccion"] = filter_params.estado_detraccion
+        
+        if filter_params.estado_pago_neto:
+            query["estado_pago_neto"] = filter_params.estado_pago_neto
+        
+        if filter_params.prioridad:
+            query["prioridad"] = filter_params.prioridad
+        
+        # Gestión administrativa
+        if filter_params.centro_costo:
+            query["centro_costo"] = safe_regex(filter_params.centro_costo)
+        
+        if filter_params.responsable_gestion:
+            query["responsable_gestion"] = safe_regex(filter_params.responsable_gestion)
+        
+        # Filtros de fechas - Probable pago
+        self._add_date_range_filter(
+            query, "fecha_probable_pago",
+            filter_params.fecha_probable_inicio,
+            filter_params.fecha_probable_fin
+        )
+        
+        # Filtros de fechas - Emisión factura
+        self._add_date_range_filter(
+            query, "datos_completos.fecha_emision",
+            filter_params.fecha_emision_inicio,
+            filter_params.fecha_emision_fin
+        )
+        
+        # Filtros de fechas - Vencimiento factura
+        self._add_date_range_filter(
+            query, "datos_completos.fecha_vencimiento",
+            filter_params.fecha_vencimiento_inicio,
+            filter_params.fecha_vencimiento_fin
+        )
+        
+        # Filtros de fechas - Servicio
+        self._add_date_range_filter(
+            query, "datos_completos.fletes.servicio.fecha_servicio",
+            filter_params.fecha_servicio_inicio,
+            filter_params.fecha_servicio_fin
+        )
+        
+        # Filtros de fechas - Pago detracción
+        self._add_date_range_filter(
+            query, "fecha_pago_detraccion",
+            filter_params.fecha_pago_detraccion_inicio,
+            filter_params.fecha_pago_detraccion_fin
+        )
+        
+        # Filtros basados en snapshots - Datos principales
+        if filter_params.nombre_cliente:
+            query["datos_completos.fletes.servicio.nombre_cliente"] = safe_regex(filter_params.nombre_cliente)
+        
+        if filter_params.nombre_cuenta:
+            query["datos_completos.fletes.servicio.nombre_cuenta"] = safe_regex(filter_params.nombre_cuenta)
+        
+        if filter_params.nombre_proveedor:
+            query["datos_completos.fletes.servicio.nombre_proveedor"] = safe_regex(filter_params.nombre_proveedor)
+        
+        # Filtros de flota y personal
+        if filter_params.placa_flota:
+            query["datos_completos.fletes.servicio.placa_flota"] = safe_regex(filter_params.placa_flota)
+        
+        if filter_params.nombre_conductor:
+            query["datos_completos.fletes.servicio.nombre_conductor"] = safe_regex(filter_params.nombre_conductor)
+        
+        if filter_params.nombre_auxiliar:
+            query["datos_completos.fletes.servicio.nombre_auxiliar"] = safe_regex(filter_params.nombre_auxiliar)
+        
+        # Filtros de servicio
+        if filter_params.tipo_servicio:
+            query["datos_completos.fletes.servicio.tipo_servicio"] = safe_regex(filter_params.tipo_servicio)
+        
+        if filter_params.modalidad:
+            query["datos_completos.fletes.servicio.modalidad"] = safe_regex(filter_params.modalidad)
+        
+        if filter_params.zona:
+            query["datos_completos.fletes.servicio.zona"] = safe_regex(filter_params.zona)
+        
+        if filter_params.origen:
+            query["datos_completos.fletes.servicio.origen"] = safe_regex(filter_params.origen)
+        
+        if filter_params.destino:
+            query["datos_completos.fletes.servicio.destino"] = safe_regex(filter_params.destino)
+        
+        # Filtros de montos con rangos
+        self._add_decimal_range_filter(
+            query, "datos_completos.monto_total",
+            filter_params.monto_total_min,
+            filter_params.monto_total_max
+        )
+        
+        self._add_decimal_range_filter(
+            query, "monto_neto",
+            filter_params.monto_neto_min,
+            filter_params.monto_neto_max
+        )
+        
+        self._add_decimal_range_filter(
+            query, "monto_detraccion",
+            filter_params.monto_detraccion_min,
+            filter_params.monto_detraccion_max
+        )
+        
+        # Filtros de GIA
+        if filter_params.gia_rr:
+            query["datos_completos.fletes.servicio.gia_rr"] = safe_regex(filter_params.gia_rr)
+        
+        if filter_params.gia_rt:
+            query["datos_completos.fletes.servicio.gia_rt"] = safe_regex(filter_params.gia_rt)
+        
+        # Filtro de saldo pendiente
+        if filter_params.tiene_saldo_pendiente is not None:
+            if filter_params.tiene_saldo_pendiente:
+                query["$expr"] = {"$gt": [
+                    {"$subtract": ["$monto_neto", "$monto_pagado_acumulado"]},
+                    0
+                ]}
+            else:
+                query["$expr"] = {"$eq": [
+                    {"$subtract": ["$monto_neto", "$monto_pagado_acumulado"]},
+                    0
+                ]}
+        
+        # Rangos de saldo pendiente (requiere aggregation)
+        if filter_params.saldo_pendiente_min or filter_params.saldo_pendiente_max:
+            saldo_conditions = []
+            if filter_params.saldo_pendiente_min:
+                saldo_conditions.append({
+                    "$gte": [
+                        {"$subtract": ["$monto_neto", "$monto_pagado_acumulado"]},
+                        float(filter_params.saldo_pendiente_min)
+                    ]
+                })
+            if filter_params.saldo_pendiente_max:
+                saldo_conditions.append({
+                    "$lte": [
+                        {"$subtract": ["$monto_neto", "$monto_pagado_acumulado"]},
+                        float(filter_params.saldo_pendiente_max)
+                    ]
+                })
+            
+            if saldo_conditions:
+                if "$expr" in query:
+                    query["$and"] = [
+                        {"$expr": query["$expr"]},
+                        {"$expr": {"$and": saldo_conditions}}
+                    ]
+                    del query["$expr"]
+                else:
+                    query["$expr"] = {"$and": saldo_conditions}
+        
+        # Búsqueda general (search)
+        if filter_params.search:
+            search_conditions = [
+                {"codigo_factura": safe_regex(filter_params.search)},
+                {"datos_completos.numero_factura": safe_regex(filter_params.search)},
+                {"datos_completos.fletes.servicio.nombre_cliente": safe_regex(filter_params.search)},
+                {"datos_completos.fletes.servicio.nombre_cuenta": safe_regex(filter_params.search)},
+                {"datos_completos.fletes.servicio.nombre_proveedor": safe_regex(filter_params.search)},
+                {"datos_completos.fletes.servicio.placa_flota": safe_regex(filter_params.search)},
+                {"datos_completos.fletes.servicio.nombre_conductor": safe_regex(filter_params.search)},
+                {"responsable_gestion": safe_regex(filter_params.search)},
+                {"observaciones_admin": safe_regex(filter_params.search)}
+            ]
+            query["$or"] = search_conditions
+        
+        return query
+    
+    def _add_date_range_filter(self, query: dict, field: str, inicio: Optional[date], fin: Optional[date]):
+        """Agregar filtro de rango de fechas"""
+        if inicio or fin:
+            date_query = {}
+            if inicio:
+                # Convertir date a datetime
+                inicio_dt = datetime.combine(inicio, datetime.min.time()) if isinstance(inicio, date) and not isinstance(inicio, datetime) else inicio
+                date_query["$gte"] = inicio_dt
+            if fin:
+                # Convertir date a datetime (incluir todo el día)
+                fin_dt = datetime.combine(fin, datetime.max.time()) if isinstance(fin, date) and not isinstance(fin, datetime) else fin
+                date_query["$lte"] = fin_dt
+            if date_query:
+                query[field] = date_query
+    
+    def _add_decimal_range_filter(self, query: dict, field: str, min_val: Optional[Decimal], max_val: Optional[Decimal]):
+        """Agregar filtro de rango de valores decimales"""
+        if min_val or max_val:
+            range_query = {}
+            if min_val:
+                range_query["$gte"] = float(min_val)
+            if max_val:
+                range_query["$lte"] = float(max_val)
+            if range_query:
+                query[field] = range_query
+    
+    def update_gestion(self, gestion_id: str, update_data: dict) -> Optional[dict]:
+        try:
+            if not ObjectId.is_valid(gestion_id):
+                return None
+            
+            gestion_actual = self.get_gestion_by_id(gestion_id)
+            if not gestion_actual:
+                return None
+            
+            update_dict = {k: v for k, v in update_data.items() if v is not None}
+            if not update_dict:
+                return gestion_actual
+
+            monto_neto = Decimal(str(gestion_actual["monto_neto"]))
+
+            # Lógica solicitada: Prioridad al estado seleccionado
+            if "estado_pago_neto" in update_dict:
+                estado = update_dict["estado_pago_neto"]
+                if estado == EstadoPagoNeto.PAGADO:
+                    update_dict["monto_pagado_acumulado"] = monto_neto
+                elif estado == EstadoPagoNeto.PENDIENTE:
+                    update_dict["monto_pagado_acumulado"] = Decimal("0")
+            
+            # Lógica secundaria: Si se envía el monto, calcular el estado (si no se forzó arriba)
+            elif "monto_pagado_acumulado" in update_dict:
+                nuevo_pagado = Decimal(str(update_dict["monto_pagado_acumulado"]))
+                if nuevo_pagado <= Decimal("0"):
+                    update_dict["estado_pago_neto"] = EstadoPagoNeto.PENDIENTE
+                elif nuevo_pagado >= monto_neto:
+                    update_dict["estado_pago_neto"] = EstadoPagoNeto.PAGADO
+                else:
+                    update_dict["estado_pago_neto"] = EstadoPagoNeto.PAGADO_PARCIAL
+
+            if "fecha_pago_detraccion" in update_dict and update_dict["fecha_pago_detraccion"]:
+                update_dict["estado_detraccion"] = EstadoDetraccion.PAGADO
+            
+            update_dict["ultima_actualizacion"] = datetime.now()
+
+            # Serialización para MongoDB
+            for k, v in update_dict.items():
+                if isinstance(v, Enum):
+                    update_dict[k] = v.value
+                elif isinstance(v, Decimal):
+                    update_dict[k] = float(v)
+                elif isinstance(v, date) and not isinstance(v, datetime):
+                    update_dict[k] = datetime.combine(v, datetime.min.time())
+
+            self.collection.update_one(
+                {"_id": ObjectId(gestion_id)},
+                {"$set": update_dict}
+            )
+            
+            return self.get_gestion_by_id(gestion_id)
+            
+        except Exception as e:
+            logger.error(f"Error al actualizar gestión: {str(e)}")
+            raise
+    def delete_gestion(self, gestion_id: str) -> bool:
+        """Eliminar gestión"""
+        try:
+            if not ObjectId.is_valid(gestion_id):
+                return False
+            
+            result = self.collection.delete_one({"_id": ObjectId(gestion_id)})
+            return result.deleted_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error al eliminar gestión: {str(e)}")
+            return False
+    
+    def registrar_pago_parcial(self, gestion_id: str, monto_pago: Decimal, nro_operacion: str = None) -> dict:
+        """Registrar un pago parcial"""
+        try:
+            gestion = self.get_gestion_by_id(gestion_id)
+            if not gestion:
+                raise ValueError("Gestión no encontrada")
+            
+            if monto_pago <= Decimal("0"):
+                raise ValueError("El monto del pago debe ser mayor a cero")
+            
+            nuevo_acumulado = gestion["monto_pagado_acumulado"] + monto_pago
+            
+            if nuevo_acumulado > gestion["monto_neto"]:
+                raise ValueError(f"El pago excede el monto neto. Saldo pendiente: {gestion['saldo_pendiente']}")
+            
+            update_data = {
+                "monto_pagado_acumulado": nuevo_acumulado
+            }
+            
+            if nro_operacion:
+                update_data["nro_operacion_pago_neto"] = nro_operacion
+            
+            return self.update_gestion(gestion_id, update_data)
+            
+        except Exception as e:
+            logger.error(f"Error al registrar pago parcial: {str(e)}")
+            raise
+    
+    def get_gestiones_vencidas(self) -> List[dict]:
+        """Obtener gestiones con pagos vencidos"""
+        try:
+            hoy = datetime.now().date()
+            
+            query = {
+                "fecha_probable_pago": {"$lt": hoy},
+                "estado_pago_neto": {
+                    "$in": [
+                        EstadoPagoNeto.PENDIENTE,
+                        EstadoPagoNeto.PROGRAMADO,
+                        EstadoPagoNeto.PAGADO_PARCIAL
+                    ]
+                }
+            }
+            
+            gestiones = list(
+                self.collection.find(query)
+                .sort("fecha_probable_pago", 1)
+            )
+            
+            for gestion in gestiones:
+                self.collection.update_one(
+                    {"_id": gestion["_id"]},
+                    {"$set": {
+                        "estado_pago_neto": EstadoPagoNeto.VENCIDO,
+                        "ultima_actualizacion": datetime.now()
+                    }}
+                )
+                gestion["estado_pago_neto"] = EstadoPagoNeto.VENCIDO
+            
+            return [self._format_gestion_response(g) for g in gestiones]
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestiones vencidas: {str(e)}")
+            return []
+    
+    def get_dashboard_stats(self) -> Dict[str, Any]:
+        try:
+            hoy_dt = datetime.combine(datetime.now().date(), time.min)
+            
+            pipeline = [
+                {
+                    "$facet": {
+                        "total": [{"$count": "count"}],
+                        "por_estado_pago": [
+                            {"$group": {"_id": "$estado_pago_neto", "count": {"$sum": 1}}}
+                        ],
+                        "por_estado_detraccion": [
+                            {"$group": {"_id": "$estado_detraccion", "count": {"$sum": 1}}}
+                        ],
+                        "por_prioridad": [
+                            {"$group": {"_id": "$prioridad", "count": {"$sum": 1}}}
+                        ],
+                        "montos": [
+                            {"$group": {
+                                "_id": None,
+                                "total_neto": {"$sum": "$monto_neto"},
+                                "total_pagado": {"$sum": "$monto_pagado_acumulado"},
+                                "total_detraccion": {"$sum": "$monto_detraccion"}
+                            }}
+                        ],
+                        "vencidas": [
+                            {
+                                "$match": {
+                                    "fecha_probable_pago": {"$lt": hoy_dt},
+                                    "estado_pago_neto": {
+                                        "$in": [
+                                            EstadoPagoNeto.PENDIENTE.value,
+                                            EstadoPagoNeto.PROGRAMADO.value,
+                                            EstadoPagoNeto.PAGADO_PARCIAL.value
+                                        ]
+                                    }
+                                }
+                            },
+                            {"$count": "count"}
+                        ]
+                    }
+                }
+            ]
+
+            result = list(self.collection.aggregate(pipeline))[0]
+
+            total = result["total"][0]["count"] if result["total"] else 0
+            vencidas = result["vencidas"][0]["count"] if result["vencidas"] else 0
+            
+            estados_pago = {str(r["_id"]): r["count"] for r in result["por_estado_pago"]}
+            estados_detraccion = {str(r["_id"]): r["count"] for r in result["por_estado_detraccion"]}
+            prioridades = {str(r["_id"]): r["count"] for r in result["por_prioridad"]}
+
+            m = result["montos"][0] if result["montos"] else {}
+            total_neto = Decimal(str(m.get("total_neto") or "0"))
+            total_pagado = Decimal(str(m.get("total_pagado") or "0"))
+            total_detraccion = Decimal(str(m.get("total_detraccion") or "0"))
+            saldo_pendiente = total_neto - total_pagado
+
+            return {
+                "total_gestiones": total,
+                "vencidas": vencidas,
+                "por_estado_pago": estados_pago,
+                "por_estado_detraccion": estados_detraccion,
+                "por_prioridad": prioridades,
+                "montos_totales": {
+                    "neto": str(total_neto),
+                    "pagado": str(total_pagado),
+                    "detraccion": str(total_detraccion),
+                    "pendiente": str(saldo_pendiente)
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error al obtener estadísticas: {str(e)}")
+            return {}
+    def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
+        """Exportar gestiones a Excel con datos completos de snapshots"""
+        try:
+            gestiones = self._get_all_gestiones_sin_paginacion(filter_params)
+            
+            if not gestiones:
+                df = pd.DataFrame(columns=[
+                    "ID", "Código Factura", "Número Factura", "Cliente", "Proveedor",
+                    "Placa", "Conductor", "Auxiliar", "Tipo Servicio", "Zona",
+                    "Fecha Servicio", "Origen", "Destino",
+                    "Estado Pago Neto", "Estado Detracción",
+                    "Monto Total", "Monto Neto", "Monto Pagado", "Saldo Pendiente",
+                    "Monto Detracción", "Tasa Detracción (%)",
+                    "Fecha Probable Pago", "Prioridad", "Responsable"
+                ])
+            else:
+                excel_data = []
+                for gestion in gestiones:
+                    # Extraer datos de snapshot si existen
+                    datos = gestion.get("datos_completos", {})
+                    flete = datos.get("fletes", [{}])[0] if datos.get("fletes") else {}
+                    servicio = flete.get("servicio", {})
+                    
+                    excel_data.append({
+                        "ID": gestion.get("id", ""),
+                        "Código Factura": gestion.get("codigo_factura", ""),
+                        "Número Factura": datos.get("numero_factura", ""),
+                        "Cliente": servicio.get("nombre_cliente", ""),
+                        "Proveedor": servicio.get("nombre_proveedor", ""),
+                        "Placa": servicio.get("placa_flota", ""),
+                        "Conductor": servicio.get("nombre_conductor", ""),
+                        "Auxiliar": servicio.get("nombre_auxiliar", ""),
+                        "Tipo Servicio": servicio.get("tipo_servicio", ""),
+                        "Zona": servicio.get("zona", ""),
+                        "Fecha Servicio": servicio.get("fecha_servicio", ""),
+                        "Origen": servicio.get("origen", ""),
+                        "Destino": servicio.get("destino", ""),
+                        "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
+                        "Estado Detracción": gestion.get("estado_detraccion", ""),
+                        "Monto Total": str(datos.get("monto_total", Decimal("0"))),
+                        "Monto Neto": str(gestion.get("monto_neto", Decimal("0"))),
+                        "Monto Pagado": str(gestion.get("monto_pagado_acumulado", Decimal("0"))),
+                        "Saldo Pendiente": str(gestion.get("saldo_pendiente", Decimal("0"))),
+                        "Monto Detracción": str(gestion.get("monto_detraccion", Decimal("0"))),
+                        "Tasa Detracción (%)": str(gestion.get("tasa_detraccion", Decimal("4.0"))),
+                        "Fecha Probable Pago": gestion.get("fecha_probable_pago", ""),
+                        "Prioridad": gestion.get("prioridad", ""),
+                        "Responsable": gestion.get("responsable_gestion", "")
+                    })
+                
+                df = pd.DataFrame(excel_data)
+            
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Gestión Facturación')
+                
+                from openpyxl.styles import Font, PatternFill, Alignment
+                
+                workbook = writer.book
+                worksheet = writer.sheets['Gestión Facturación']
+                
+                header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                header_font = Font(color="FFFFFF", bold=True)
+                
+                for cell in worksheet[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            output.seek(0)
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error al exportar a Excel: {str(e)}")
+            raise
+    
+    def _get_all_gestiones_sin_paginacion(
+        self,
+        filter_params: Optional[FacturacionGestionFilter] = None
+    ) -> List[dict]:
+        """Obtener TODAS las gestiones sin paginación (para exportación)"""
+        try:
+            query = self._build_query(filter_params)
+            
+            gestiones = list(
+                self.collection.find(query)
+                .sort("fecha_probable_pago", 1)
+            )
+            
+            return [self._format_gestion_response(g) for g in gestiones]
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestiones (sin paginación): {str(e)}")
+            raise
+    
+    def _format_gestion_response(self, gestion: dict) -> dict:
+        """Formatear respuesta de gestión incluyendo datos_completos"""
+        if not gestion:
+            return {}
+        
+        result = {
+            "id": str(gestion["_id"]),
+            "codigo_factura": gestion.get("codigo_factura", ""),
+            "datos_completos": gestion.get("datos_completos"),
+            "estado_detraccion": gestion.get("estado_detraccion", EstadoDetraccion.PENDIENTE),
+            "tasa_detraccion": gestion.get("tasa_detraccion", Decimal("4.0")),
+            "monto_detraccion": gestion.get("monto_detraccion", Decimal("0.0")),
+            "nro_constancia_detraccion": gestion.get("nro_constancia_detraccion"),
+            "fecha_pago_detraccion": gestion.get("fecha_pago_detraccion"),
+            "estado_pago_neto": gestion.get("estado_pago_neto", EstadoPagoNeto.PENDIENTE),
+            "monto_neto": gestion.get("monto_neto", Decimal("0.0")),
+            "monto_pagado_acumulado": gestion.get("monto_pagado_acumulado", Decimal("0.0")),
+            "banco_destino": gestion.get("banco_destino"),
+            "cuenta_bancaria_destino": gestion.get("cuenta_bancaria_destino"),
+            "nro_operacion_pago_neto": gestion.get("nro_operacion_pago_neto"),
+            "fecha_probable_pago": gestion.get("fecha_probable_pago"),
+            "prioridad": gestion.get("prioridad", PrioridadPago.MEDIA),
+            "centro_costo": gestion.get("centro_costo"),
+            "responsable_gestion": gestion.get("responsable_gestion"),
+            "observaciones_admin": gestion.get("observaciones_admin"),
+            "ultima_actualizacion": gestion.get("ultima_actualizacion")
+        }
+        
+        result["saldo_pendiente"] = result["monto_neto"] - result["monto_pagado_acumulado"]
+        
+        return result
+    
+    def get_gestiones_por_vencer(self, dias: int = 7) -> List[dict]:
+        """Obtener gestiones que están por vencer en los próximos X días"""
+        try:
+            hoy = datetime.now().date()
+            fecha_limite = hoy + timedelta(days=dias)
+            
+            query = {
+                "fecha_probable_pago": {
+                    "$gte": hoy,
+                    "$lte": fecha_limite
+                },
+                "estado_pago_neto": {
+                    "$in": [
+                        EstadoPagoNeto.PENDIENTE,
+                        EstadoPagoNeto.PROGRAMADO,
+                        EstadoPagoNeto.PAGADO_PARCIAL
+                    ]
+                }
+            }
+            
+            gestiones = list(
+                self.collection.find(query)
+                .sort("fecha_probable_pago", 1)
+            )
+            
+            return [self._format_gestion_response(g) for g in gestiones]
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gestiones por vencer: {str(e)}")
+            return []
+
+
+def safe_regex(value: str):
+    """Crear expresión regular segura para búsquedas"""
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    return {"$regex": re.escape(value), "$options": "i"}

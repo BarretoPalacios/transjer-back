@@ -1,0 +1,203 @@
+from typing import List, Optional, Dict, Any
+from bson import ObjectId
+from app.modules.utils.core.code_generator.code_generator import generate_sequential_code
+from app.modules.fletes.fletes_model import Flete
+from app.modules.fletes.fletes_schemas import FleteFilter
+from datetime import datetime
+import logging
+from math import ceil
+import re
+
+logger = logging.getLogger(__name__)
+
+class FleteService:
+    def __init__(self, db):
+        self.db = db 
+        self.collection = db["fletes"]
+    
+    def create_flete(self, flete_data: dict) -> dict:
+        """Crear un nuevo flete con valores por defecto de facturación"""
+        try:
+            # Generar código automáticamente
+            codigo_flete = generate_sequential_code(
+                counters_collection=self.db["counters"],
+                target_collection=self.collection,
+                sequence_name="fletes",
+                field_name="codigo_flete",
+                prefix="FLT-",
+                length=10
+            )
+
+            flete_data["codigo_flete"] = codigo_flete
+            flete_data["fecha_creacion"] = datetime.now()
+            
+            # Asegurar valores iniciales de facturación
+            flete_data.setdefault("pertenece_a_factura", False)
+            flete_data.setdefault("factura_id", None)
+            flete_data.setdefault("codigo_factura", None)
+
+            # Crear modelo
+            flete_model = Flete(**flete_data)
+
+            # Insertar
+            result = self.collection.insert_one(
+                flete_model.model_dump(by_alias=True)
+            )
+
+            return self.get_flete_by_id(str(result.inserted_id))
+
+        except Exception as e:
+            logger.error(f"Error al crear flete: {str(e)}")
+            raise
+    
+    def get_flete_by_id(self, flete_id: str) -> Optional[dict]:
+        """Obtener flete por ID"""
+        try:
+            if not ObjectId.is_valid(flete_id):
+                return None
+            
+            flete = self.collection.find_one({"_id": ObjectId(flete_id)})
+            if flete:
+                flete["id"] = str(flete["_id"])
+                del flete["_id"]
+            return flete
+            
+        except Exception as e:
+            logger.error(f"Error al obtener flete: {str(e)}")
+            return None
+
+    def get_all_fletes(
+        self,
+        filter_params: Optional[FleteFilter] = None,
+        page: int = 1,
+        page_size: int = 10
+    ) -> dict:
+        """Obtener fletes con filtros de facturación y paginación"""
+        try:
+            query = {}
+
+            if filter_params:
+                if filter_params.codigo_flete:
+                    query["codigo_flete"] = safe_regex(filter_params.codigo_flete)
+
+                if filter_params.servicio_id:
+                    query["servicio_id"] = filter_params.servicio_id
+                
+                if filter_params.codigo_servicio:
+                    query["codigo_servicio"] = safe_regex(filter_params.codigo_servicio)
+
+                if filter_params.estado_flete:
+                    query["estado_flete"] = filter_params.estado_flete
+
+                # Filtros de Facturación
+                if filter_params.pertenece_a_factura is not None:
+                    query["pertenece_a_factura"] = filter_params.pertenece_a_factura
+                
+                if filter_params.codigo_factura:
+                    query["codigo_factura"] = safe_regex(filter_params.codigo_factura)
+
+                # Filtros de Monto
+                if filter_params.monto_flete_min is not None:
+                    query.setdefault("monto_flete", {})["$gte"] = filter_params.monto_flete_min
+                if filter_params.monto_flete_max is not None:
+                    query.setdefault("monto_flete", {})["$lte"] = filter_params.monto_flete_max
+
+                # Filtros de Fecha
+                if filter_params.fecha_creacion_desde:
+                    query.setdefault("fecha_creacion", {})["$gte"] = filter_params.fecha_creacion_desde
+                if filter_params.fecha_creacion_hasta:
+                    query.setdefault("fecha_creacion", {})["$lte"] = filter_params.fecha_creacion_hasta
+
+            total = self.collection.count_documents(query)
+            skip = (page - 1) * page_size
+
+            fletes = list(
+                self.collection.find(query)
+                .sort("fecha_creacion", -1)
+                .skip(skip)
+                .limit(page_size)
+            )
+
+            for flete in fletes:
+                flete["id"] = str(flete["_id"])
+                del flete["_id"]
+
+            total_pages = ceil(total / page_size) if page_size > 0 else 0
+
+            return {
+                "items": fletes,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        except Exception as e:
+            logger.error(f"Error al obtener fletes: {str(e)}")
+            raise
+    
+    def update_flete(self, flete_id: str, update_data: dict) -> Optional[dict]:
+        try:
+            if not ObjectId.is_valid(flete_id):
+                return None
+            
+            update_dict = {k: v for k, v in update_data.items() if v is not None}
+            if not update_dict:
+                return self.get_flete_by_id(flete_id)
+            
+            monto = update_dict.get("monto_flete")
+            if monto is not None and monto > 0:
+                update_dict["estado_flete"] = "VALORIZADO"
+
+            update_dict["fecha_actualizacion"] = datetime.now()
+            
+            self.collection.update_one(
+                {"_id": ObjectId(flete_id)},
+                {"$set": update_dict}
+            )
+            
+            return self.get_flete_by_id(flete_id)
+            
+        except Exception as e:
+            logger.error(f"Error al actualizar flete: {str(e)}")
+            raise
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Estadísticas incluyendo resumen de facturación"""
+        try:
+            pipeline_stats = [
+                {
+                    "$group": {
+                        "_id": "$estado_flete",
+                        "total_monto": {"$sum": "$monto_flete"},
+                        "cantidad": {"$sum": 1}
+                    }
+                }
+            ]
+            
+            # Estadísticas de facturación
+            facturados = self.collection.count_documents({"pertenece_a_factura": True})
+            no_facturados = self.collection.count_documents({"pertenece_a_factura": False})
+            
+            montos_por_estado = {res["_id"]: {"total": res["total_monto"], "cantidad": res["cantidad"]} 
+                                 for res in self.collection.aggregate(pipeline_stats)}
+            
+            return {
+                "total_general": self.collection.count_documents({}),
+                "por_estado": montos_por_estado,
+                "facturacion": {
+                    "facturados_count": facturados,
+                    "pendientes_facturar_count": no_facturados
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al obtener estadísticas: {str(e)}")
+            return {}
+
+def safe_regex(value: str):
+    if not value or not value.strip():
+        return None
+    return {"$regex": re.escape(value.strip()), "$options": "i"}
