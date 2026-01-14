@@ -624,4 +624,39 @@ def obtener_resumen_pendientes():
         logger.error(f"Error al obtener resumen pendientes: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-
+@router.get("/dashboard/analytics/advanced")
+def obtener_analytics_avanzadas(timeframe: str = "month"):
+    """
+    Obtiene analíticas avanzadas con gráficos y KPIs
+    
+    Parámetros:
+    - timeframe: "day", "week", "month", "year" (default: "month")
+    """
+    try:
+        # Validar timeframe
+        valid_timeframes = ["day", "week", "month", "year"]
+        if timeframe not in valid_timeframes:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Timeframe inválido. Valores permitidos: {', '.join(valid_timeframes)}"
+            )
+        
+        db = get_database()
+        gestion_service = FacturacionGestionService(db)
+        
+        analytics = gestion_service.get_advanced_analytics(timeframe=timeframe)
+        
+        if not analytics:
+            return {
+                "kpis": {},
+                "graficos": {},
+                "message": "No hay datos disponibles"
+            }
+        
+        return analytics
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener analíticas avanzadas: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")

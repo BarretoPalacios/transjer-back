@@ -495,45 +495,56 @@ class FacturacionGestionService:
             logger.error(f"Error al obtener gestiones vencidas: {str(e)}")
             return []
     
-    def get_dashboard_stats(self) -> Dict[str, Any]:
+    def get_dashboard_stats(self, cliente_nombre: str = None) -> Dict[str, Any]:
         try:
             hoy_dt = datetime.combine(datetime.now().date(), time.min)
-            
+            hoy_str = hoy_dt.strftime("%Y-%m-%d")
+
+            # 1. Definimos qué estados NO deben sumar dinero (Anuladas)
+            estado_anulado = "Anulado" # Asegúrate de que coincida con tu DB
+
             pipeline = [
+                # Filtro inicial opcional por cliente
+                { "$match": {"datos_completos.fletes.servicio.nombre_cliente": cliente_nombre} if cliente_nombre else {} },
+                
                 {
                     "$facet": {
-                        "total": [{"$count": "count"}],
+                        # Conteo general (incluye todo para saber qué pasó)
+                        "metricas_globales": [
+                            {"$group": {
+                                "_id": None,
+                                "total_items": {"$sum": 1},
+                                "total_anuladas": {
+                                    "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", estado_anulado]}, 1, 0]}
+                                }
+                            }}
+                        ],
                         "por_estado_pago": [
                             {"$group": {"_id": "$estado_pago_neto", "count": {"$sum": 1}}}
                         ],
-                        "por_estado_detraccion": [
-                            {"$group": {"_id": "$estado_detraccion", "count": {"$sum": 1}}}
-                        ],
-                        "por_prioridad": [
-                            {"$group": {"_id": "$prioridad", "count": {"$sum": 1}}}
-                        ],
-                        "montos": [
-                            {"$group": {
-                                "_id": None,
-                                "total_neto": {"$sum": "$monto_neto"},
-                                "total_pagado": {"$sum": "$monto_pagado_acumulado"},
-                                "total_detraccion": {"$sum": "$monto_detraccion"}
-                            }}
-                        ],
-                        "vencidas": [
+                        # CÁLCULOS FINANCIEROS (Solo facturas NO anuladas)
+                        "financiero": [
+                            { "$match": { "estado_pago_neto": { "$ne": estado_anulado } } },
                             {
-                                "$match": {
-                                    "fecha_probable_pago": {"$lt": hoy_dt},
-                                    "estado_pago_neto": {
-                                        "$in": [
-                                            EstadoPagoNeto.PENDIENTE.value,
-                                            EstadoPagoNeto.PROGRAMADO.value,
-                                            EstadoPagoNeto.PAGADO_PARCIAL.value
-                                        ]
+                                "$group": {
+                                    "_id": None,
+                                    "neto": {"$sum": {"$toDouble": "$monto_neto"}},
+                                    "pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                                    "detraccion": {"$sum": {"$toDouble": "$monto_detraccion"}},
+                                    # Solo sumamos vencidas aquí dentro para asegurar que NO sean anuladas
+                                    "vencidas_count": {
+                                        "$sum": {
+                                            "$cond": [
+                                                { "$and": [
+                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy_str] },
+                                                    { "$in": ["$estado_pago_neto", ["Pendiente", "Pagado Parcial"]]}
+                                                ]},
+                                                1, 0
+                                            ]
+                                        }
                                     }
                                 }
-                            },
-                            {"$count": "count"}
+                            }
                         ]
                     }
                 }
@@ -541,35 +552,31 @@ class FacturacionGestionService:
 
             result = list(self.collection.aggregate(pipeline))[0]
 
-            total = result["total"][0]["count"] if result["total"] else 0
-            vencidas = result["vencidas"][0]["count"] if result["vencidas"] else 0
+            # --- Extracción segura de datos ---
+            globales = result["metricas_globales"][0] if result["metricas_globales"] else {}
+            fin = result["financiero"][0] if result["financiero"] else {}
             
-            estados_pago = {str(r["_id"]): r["count"] for r in result["por_estado_pago"]}
-            estados_detraccion = {str(r["_id"]): r["count"] for r in result["por_estado_detraccion"]}
-            prioridades = {str(r["_id"]): r["count"] for r in result["por_prioridad"]}
-
-            m = result["montos"][0] if result["montos"] else {}
-            total_neto = Decimal(str(m.get("total_neto") or "0"))
-            total_pagado = Decimal(str(m.get("total_pagado") or "0"))
-            total_detraccion = Decimal(str(m.get("total_detraccion") or "0"))
+            total_neto = Decimal(str(fin.get("neto") or "0"))
+            total_pagado = Decimal(str(fin.get("pagado") or "0"))
+            total_detraccion = Decimal(str(fin.get("detraccion") or "0"))
+            
+            # El saldo pendiente real es lo que falta por pagar de facturas NO anuladas
             saldo_pendiente = total_neto - total_pagado
 
             return {
-                "total_gestiones": total,
-                "vencidas": vencidas,
-                "por_estado_pago": estados_pago,
-                "por_estado_detraccion": estados_detraccion,
-                "por_prioridad": prioridades,
+                "total_gestiones": globales.get("total_items", 0),
+                "cant_anuladas": globales.get("total_anuladas", 0),
+                "vencidas": fin.get("vencidas_count", 0),
+                "por_estado_pago": {str(r["_id"]): r["count"] for r in result["por_estado_pago"]},
                 "montos_totales": {
-                    "neto": str(total_neto),
-                    "pagado": str(total_pagado),
-                    "detraccion": str(total_detraccion),
-                    "pendiente": str(saldo_pendiente)
+                    "neto": f"{total_neto:,.2f}",
+                    "pagado": f"{total_pagado:,.2f}",
+                    "detraccion": f"{total_detraccion:,.2f}",
+                    "pendiente": f"{saldo_pendiente:,.2f}"
                 }
             }
-
         except Exception as e:
-            logger.error(f"Error al obtener estadísticas: {str(e)}")
+            print(f"Error: {e}")
             return {}
     def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
         """Exportar gestiones a Excel con datos completos de snapshots"""
@@ -741,7 +748,237 @@ class FacturacionGestionService:
             logger.error(f"Error al obtener gestiones por vencer: {str(e)}")
             return []
 
+    def get_advanced_analytics(self, timeframe: str = "month") -> Dict[str, Any]:
+        """
+        timeframe: "day", "week", "month", "year"
+        """
+        try:
+            hoy_dt = datetime.now()
+            hoy_str = hoy_dt.strftime("%Y-%m-%d")
+            
+            # Formato de fecha para el agrupamiento temporal
+            date_format = {
+                "day": "%Y-%m-%d",
+                "week": "%Y-W%V",
+                "month": "%Y-%m",
+                "year": "%Y"
+            }.get(timeframe, "%Y-%m")
 
+            pipeline = [
+                {
+                    "$facet": {
+                        # ========== ANALÍTICAS FINANCIERAS (A NIVEL FACTURA) ==========
+                        # NUNCA usar $unwind aquí porque multiplica los montos
+                        
+                        # 1. RESUMEN FINANCIERO TOTAL (Basado en Facturas)
+                        "totales_generales": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$group": {
+                                "_id": None,
+                                "total_facturado": { "$sum": { "$toDouble": "$monto_neto" } },
+                                "total_pagado": { "$sum": { "$toDouble": "$monto_pagado_acumulado" } },
+                                "total_detraccion": { "$sum": { "$toDouble": "$monto_detraccion" } },
+                                "cantidad_facturas": { "$sum": 1 }
+                            }}
+                        ],
+
+                        # 2. ESTADOS DE FACTURAS (Cantidades)
+                        "estados_facturas": [
+                            { "$group": {
+                                "_id": "$estado_pago_neto",
+                                "cantidad": { "$sum": 1 }
+                            }}
+                        ],
+
+                        # 3. FACTURAS VENCIDAS (A nivel factura, no flete)
+                        "vencidas": [
+                            { "$match": { 
+                                "estado_pago_neto": { "$in": ["Pendiente", "Pagado Parcial"] },
+                                "datos_completos.fecha_vencimiento": { "$lt": hoy_str }
+                            }},
+                            { "$count": "conteo" }
+                        ],
+
+                        # 4. TENDENCIA TEMPORAL DE FACTURACIÓN (Por Facturas)
+                        "tendencia_temporal": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$addFields": {
+                                "periodo": { "$dateToString": { 
+                                    "format": date_format, 
+                                    "date": { "$toDate": "$datos_completos.fecha_emision" } 
+                                }}
+                            }},
+                            { "$group": {
+                                "_id": "$periodo",
+                                "monto": { "$sum": { "$toDouble": "$monto_neto" } },
+                                "facturas": { "$sum": 1 }
+                            }},
+                            { "$sort": { "_id": 1 } }
+                        ],
+
+                        # 5. TENDENCIA MENSUAL DE VENTAS (Por Facturas)
+                        "tendencia_ventas": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$addFields": {
+                                "mes": { "$substr": ["$datos_completos.fecha_emision", 0, 7] }
+                            }},
+                            { "$group": {
+                                "_id": "$mes",
+                                "total": { "$sum": { "$toDouble": "$monto_neto" } },
+                                "facturas": { "$sum": 1 }
+                            }},
+                            { "$sort": { "_id": 1 } }
+                        ],
+
+                        # ========== ANALÍTICAS OPERATIVAS (A NIVEL FLETE) ==========
+                        # Aquí SÍ usamos $unwind porque analizamos operaciones individuales
+                        
+                        # 6. CONTEO TOTAL DE FLETES
+                        "total_fletes": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$count": "total" }
+                        ],
+
+                        # 7. TOP CONDUCTORES (Ranking por viajes)
+                        "ranking_conductores": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$group": {
+                                "_id": "$datos_completos.fletes.servicio.nombre_conductor",
+                                "viajes": { "$sum": 1 }
+                            }},
+                            { "$sort": { "viajes": -1 } },
+                            { "$limit": 5 }
+                        ],
+
+                        # 8. RUTAS MÁS FRECUENTES
+                        "rutas_frecuentes": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$group": {
+                                "_id": { 
+                                    "orig": "$datos_completos.fletes.servicio.origen", 
+                                    "dest": "$datos_completos.fletes.servicio.destino" 
+                                },
+                                "conteo": { "$sum": 1 }
+                            }},
+                            { "$sort": { "conteo": -1 } },
+                            { "$limit": 5 }
+                        ],
+
+                        # 9. TOP CLIENTES (Por monto facturado total)
+                        "top_clientes": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$group": {
+                                "_id": {
+                                    "cliente": "$datos_completos.fletes.servicio.nombre_cliente",
+                                    "factura": "$numero_factura"
+                                },
+                                "monto_factura": { "$first": { "$toDouble": "$monto_neto" } }
+                            }},
+                            { "$group": {
+                                "_id": "$_id.cliente",
+                                "total_facturado": { "$sum": "$monto_factura" },
+                                "cantidad_facturas": { "$sum": 1 }
+                            }},
+                            { "$sort": { "total_facturado": -1 } },
+                            { "$limit": 5 }
+                        ],
+                        
+                        # 10. TOP PROVEEDORES (Por monto de fletes)
+                        "top_proveedores": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$group": {
+                                "_id": "$datos_completos.fletes.servicio.nombre_proveedor",
+                                "monto_fletes": { "$sum": { "$toDouble": "$datos_completos.fletes.monto_flete" } },
+                                "servicios_realizados": { "$sum": 1 }
+                            }},
+                            { "$sort": { "monto_fletes": -1 } },
+                            { "$limit": 5 }
+                        ],
+                        
+                        # 11. EFICIENCIA DE FLOTA (Por placas)
+                        "uso_placas": [
+                            { "$match": { "estado_pago_neto": { "$ne": "Anulado" } } },
+                            { "$unwind": "$datos_completos.fletes" },
+                            { "$group": {
+                                "_id": "$datos_completos.fletes.servicio.placa_flota",
+                                "conteo": { "$sum": 1 },
+                                "total_tonelaje": { "$sum": { "$toDouble": "$datos_completos.fletes.servicio.tn" } }
+                            }},
+                            { "$sort": { "conteo": -1 } },
+                            { "$limit": 10 }
+                        ]
+                    }
+                }
+            ]
+
+            raw = list(self.collection.aggregate(pipeline))[0]
+
+            # Procesamiento de datos
+            totales = raw["totales_generales"][0] if raw["totales_generales"] else {}
+            total_fletes_obj = raw["total_fletes"][0] if raw["total_fletes"] else {}
+            
+            neto = Decimal(str(totales.get("total_facturado", 0)))
+            pagado = Decimal(str(totales.get("total_pagado", 0)))
+
+            return {
+                "kpis": {
+                    "facturado_total": f"{neto:,.2f}",
+                    "pagado_total": f"{pagado:,.2f}",
+                    "pendiente_total": f"{(neto - pagado):,.2f}",
+                    "total_facturas": totales.get("cantidad_facturas", 0),
+                    "total_fletes": total_fletes_obj.get("total", 0),
+                    "facturas_vencidas": raw["vencidas"][0]["conteo"] if raw["vencidas"] else 0
+                },
+                "graficos": {
+                    "linea_tiempo": {
+                        "labels": [r["_id"] for r in raw["tendencia_temporal"]],
+                        "datasets": [
+                            {
+                                "label": "Monto Facturado",
+                                "data": [float(r["monto"]) for r in raw["tendencia_temporal"]]
+                            },
+                            {
+                                "label": "Cant. Facturas",
+                                "data": [r["facturas"] for r in raw["tendencia_temporal"]]
+                            }
+                        ]
+                    },
+                    "conductores_activos": {
+                        "labels": [r["_id"] for r in raw["ranking_conductores"]],
+                        "data": [r["viajes"] for r in raw["ranking_conductores"]]
+                    },
+                    "rutas_top": {
+                        "labels": [f"{r['_id']['orig']} → {r['_id']['dest']}" for r in raw["rutas_frecuentes"]],
+                        "data": [r["conteo"] for r in raw["rutas_frecuentes"]]
+                    },
+                    "clientes_top": {
+                        "labels": [r["_id"] if r["_id"] else "Sin Cliente" for r in raw["top_clientes"]],
+                        "data": [float(r["total_facturado"]) for r in raw["top_clientes"]]
+                    },
+                    "proveedores_top": {
+                        "labels": [r["_id"] if r["_id"] else "Sin Proveedor" for r in raw["top_proveedores"]],
+                        "data": [float(r["monto_fletes"]) for r in raw["top_proveedores"]]
+                    },
+                    "placas_activas": {
+                        "labels": [r["_id"] if r["_id"] else "Sin Placa" for r in raw["uso_placas"]],
+                        "data": [r["conteo"] for r in raw["uso_placas"]],
+                        "tonelaje": [float(r["total_tonelaje"]) for r in raw["uso_placas"]]
+                    },
+                    "tendencia_mensual": {
+                        "labels": [r["_id"] for r in raw["tendencia_ventas"]],
+                        "data": [float(r["total"]) for r in raw["tendencia_ventas"]]
+                    }
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en analítica avanzada: {e}")
+            return {}
 def safe_regex(value: str):
     """Crear expresión regular segura para búsquedas"""
     if not value:

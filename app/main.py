@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
     # CORS (adjust origins for production)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["https://sistema.transjer.com.pe/","https://sistema.transjer.com.pe",],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
