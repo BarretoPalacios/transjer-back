@@ -624,7 +624,8 @@ def obtener_resumen_pendientes():
         logger.error(f"Error al obtener resumen pendientes: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-@router.get("/dashboard/analytics/advanced")
+
+@router.get("/dashboard/analytics/advanced?{timeframe}")
 def obtener_analytics_avanzadas(timeframe: str = "month"):
     """
     Obtiene analíticas avanzadas con gráficos y KPIs
