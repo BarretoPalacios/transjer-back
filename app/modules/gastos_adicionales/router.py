@@ -124,6 +124,24 @@ def obtener_gastos_por_flete(id_flete: str):
         logger.error(f"Error al obtener gastos por flete: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
+@router.get("/flete-code/{id_flete}")
+def obtener_gastos_por_flete_code(id_flete: str):
+    try:
+        db = get_database()
+        gasto_service = GastoAdicionalService(db)
+        
+        resumen = gasto_service.get_gastos_by_code_flete(id_flete)
+        if not resumen:
+            raise HTTPException(status_code=404, detail="No se encontraron gastos para este flete")
+        
+        return resumen
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener gastos por flete: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
 @router.put("/{gasto_id}", response_model=GastoAdicionalResponse)
 def actualizar_gasto(gasto_id: str, gasto_update: GastoAdicionalUpdate):
     try:

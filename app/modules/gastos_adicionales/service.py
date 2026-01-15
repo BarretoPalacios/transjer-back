@@ -21,6 +21,7 @@ class GastoAdicionalService:
     def __init__(self, db):
         self.db = db 
         self.collection = db["gastos_adicionales"]
+        self.fletes_collection = db["fletes"]
     
     def create_gasto(self, gasto_data: dict) -> dict:
         """Crear un nuevo gasto adicional"""
@@ -480,6 +481,53 @@ class GastoAdicionalService:
         """Obtener resumen de gastos por flete"""
         try:
             gastos = list(self.collection.find({"id_flete": id_flete}))
+            
+            for gasto in gastos:
+                gasto["id"] = str(gasto["_id"])
+                del gasto["_id"]
+            
+            total_gastos = sum(g.get("valor", 0) for g in gastos)
+            total_recuperable = sum(
+                g.get("valor", 0) for g in gastos 
+                if g.get("se_factura_cliente") == True
+            )
+            total_costo_operativo = sum(
+                g.get("valor", 0) for g in gastos 
+                if g.get("se_factura_cliente") == False
+            )
+            
+            return {
+                "id_flete": id_flete,
+                "total_gastos": round(total_gastos, 2),
+                "total_recuperable_cliente": round(total_recuperable, 2),
+                "total_costo_operativo": round(total_costo_operativo, 2),
+                "cantidad_gastos": len(gastos),
+                "gastos": gastos
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al obtener gastos por flete: {str(e)}")
+            return {}
+
+    def get_gastos_by_code_flete(self, id_flete: str) -> Dict[str, Any]:
+        """Obtener resumen de gastos por flete"""
+        try:
+            # print(id_flete)
+            flete = self.fletes_collection.find_one({
+                    "codigo_flete": id_flete
+                })
+            # print(flete)
+
+            if not flete:
+                raise ValueError("Flete no encontrado")
+
+            # 3️⃣ Obtener ID REAL del flete
+            id_flete = str(flete["_id"])
+
+            # 4️⃣ Buscar gastos asociados
+            gastos = list(self.collection.find({
+                "id_flete": id_flete
+            }))
             
             for gasto in gastos:
                 gasto["id"] = str(gasto["_id"])
