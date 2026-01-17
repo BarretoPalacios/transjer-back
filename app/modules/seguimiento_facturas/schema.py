@@ -27,24 +27,24 @@ class PrioridadPago(str, Enum):
 
 # --- SNAPSHOTS ---
 class ServicioSnapshot(BaseModel):
-    codigo_servicio: str
-    nombre_cliente: str
-    nombre_cuenta: str
-    nombre_proveedor: str
-    placa_flota: str
-    nombre_conductor: str
-    nombre_auxiliar: str
-    m3: str
-    tn: str
-    tipo_servicio: str
-    modalidad: str
-    zona: str
+    codigo_servicio: Optional[str] = None
+    nombre_cliente: Optional[str] = None
+    nombre_cuenta: Optional[str] = None
+    nombre_proveedor: Optional[str] = None
+    placa_flota: Optional[str] = None
+    nombre_conductor: Optional[str] = None
+    nombre_auxiliar: Optional[str] = None
+    m3: Optional[str] = None
+    tn: Optional[str] = None
+    tipo_servicio: Optional[str] = None
+    modalidad: Optional[str] = None
+    zona: Optional[str] = None
     fecha_servicio: date
     fecha_salida: date
-    gia_rr: str
-    gia_rt: str
-    origen: str
-    destino: str
+    gia_rr: Optional[str] = None
+    gia_rt: Optional[str] = None
+    origen: Optional[str] = None
+    destino: Optional[str] = None
 
 class FleteSnapshot(BaseModel):
     codigo_flete: str

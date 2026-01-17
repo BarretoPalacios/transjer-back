@@ -420,3 +420,4 @@ def obtener_estadisticas_facturas():
     except Exception as e:
         logger.error(f"Error al obtener estadísticas: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+

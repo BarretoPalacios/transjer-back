@@ -255,7 +255,7 @@ class ServicioPrincipalService:
             
             servicios_list = list(
                 self.collection.find(query)
-                .sort("fecha_registro", -1)
+                .sort("codigo_servicio_principal", 1)
                 .skip(skip)
                 .limit(page_size)
             )
@@ -926,3 +926,134 @@ class ServicioPrincipalService:
         except Exception as e:
             logger.error(f"Error al obtener estadísticas: {str(e)}")
             return {}
+
+
+
+    def importar_excel_servicios_historicos(self, file_content: bytes) -> Dict[str, Any]:
+        """
+        Método robusto para importar Excel
+        """
+        try:
+            # Importar el servicio funcional
+            from app.modules.servicios.services.carga_excel_servicios import CargaExcelFuncionalServicios
+            
+            # Crear instancia
+            carga_service = CargaExcelFuncionalServicios(self.db)
+            
+            # Procesar
+            resultado = carga_service.cargar_excel_funcional(file_content)
+            
+            # Agregar estadísticas
+            resultado["timestamp"] = datetime.now().isoformat()
+            resultado["servicios_totales"] = self.collection.count_documents({})
+            
+            logger.info(f"✅ Importación completada: {resultado['servicios_creados']} creados, {resultado['errores']} errores")
+            
+            return resultado
+            
+        except Exception as e:
+            logger.error(f"❌ Error en importación: {str(e)}", exc_info=True)
+            # Retornar error controlado
+            return {
+                "success": False,
+                "error": str(e),
+                "total_filas_excel": 0,
+                "servicios_creados": 0,
+                "errores": 1,
+                "detalle_errores": [{"error": str(e)}]
+            }
+    
+    # Método de debug mejorado
+    def debug_excel(self, file_content: bytes) -> Dict[str, Any]:
+        """
+        Método de debug que no inserta, solo analiza
+        """
+        try:
+            import pandas as pd
+            from io import BytesIO
+            
+            # Leer Excel
+            df = pd.read_excel(BytesIO(file_content))
+            
+            # Información básica
+            info = {
+                "filas": len(df),
+                "columnas": len(df.columns),
+                "nombres_columnas": list(df.columns),
+                "tipos_datos": {},
+                "primera_fila": {},
+                "muestra": {}
+            }
+            
+            # Tipos de datos
+            for col in df.columns:
+                if len(df) > 0:
+                    val = df[col].iloc[0]
+                    info["tipos_datos"][col] = {
+                        "tipo_python": str(type(val)),
+                        "valor_ejemplo": str(val)[:100] if not pd.isna(val) else None,
+                        "es_nan": pd.isna(val)
+                    }
+            
+            # Primera fila completa
+            if len(df) > 0:
+                primera_fila = df.iloc[0]
+                info["primera_fila"] = {
+                    col: None if pd.isna(val) else str(val)
+                    for col, val in primera_fila.items()
+                }
+            
+            # Muestra de 3 filas
+            muestra = []
+            for i in range(min(3, len(df))):
+                fila = df.iloc[i]
+                muestra.append({
+                    "fila": i+1,
+                    "cliente": str(fila.get('CLIENTE', 'N/A')) if 'CLIENTE' in df.columns else 'N/A',
+                    "fecha": str(fila.get('F. DE SERVICIO', 'N/A')) if 'F. DE SERVICIO' in df.columns else 'N/A',
+                    "proveedor": str(fila.get('PROVEEDOR', 'N/A')) if 'PROVEEDOR' in df.columns else 'N/A'
+                })
+            info["muestra"] = muestra
+            
+            # Datos nulos
+            info["nulos_por_columna"] = df.isnull().sum().to_dict()
+            
+            return {
+                "success": True,
+                "info": info,
+                "recomendaciones": self._generar_recomendaciones(df)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en debug: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _generar_recomendaciones(self, df: pd.DataFrame) -> List[str]:
+        """Genera recomendaciones basadas en el Excel"""
+        recomendaciones = []
+        
+        # Verificar columnas esperadas
+        columnas_esperadas = ['CUENTA', 'CLIENTE', 'PROVEEDOR', 'F. DE SERVICIO']
+        columnas_encontradas = [col.upper() for col in df.columns]
+        
+        for col_esperada in columnas_esperadas:
+            if col_esperada not in columnas_encontradas:
+                # Buscar similar
+                similares = [c for c in columnas_encontradas if col_esperada in c or c in col_esperada]
+                if similares:
+                    recomendaciones.append(f"'{col_esperada}' no encontrada. Similar: {similares[0]}")
+                else:
+                    recomendaciones.append(f"Columna '{col_esperada}' no encontrada")
+        
+        # Verificar nulos
+        for col in df.columns:
+            nulos = df[col].isnull().sum()
+            if nulos > 0:
+                porcentaje = (nulos / len(df)) * 100
+                if porcentaje > 50:
+                    recomendaciones.append(f"Columna '{col}' tiene {porcentaje:.1f}% valores nulos")
+        
+        return recomendaciones

@@ -17,6 +17,7 @@ from app.modules.servicios.schemas.servicio_principal_schema import (
     EstadoServicio
 )
 import logging
+from datetime import datetime 
 
 logger = logging.getLogger(__name__)
 
@@ -364,3 +365,85 @@ def obtener_estadisticas_servicios_principales():
     except Exception as e:
         logger.error(f"Error al obtener estadísticas: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
+
+
+@router.post("/cargar-excel-historico")
+async def cargar_excel_historico(
+    archivo: UploadFile = File(..., description="Archivo Excel con servicios históricos")
+):
+    """
+    Carga Excel histórico - VERSIÓN CORREGIDA
+    """
+    try:
+        # Validar archivo
+        if not archivo.filename.lower().endswith(('.xlsx', '.xls', '.xlsm')):
+            raise HTTPException(
+                status_code=400,
+                detail="Formato no soportado. Use .xlsx, .xls o .xlsm"
+            )
+        
+        # Leer contenido
+        contenido = await archivo.read()
+        if len(contenido) == 0:
+            raise HTTPException(status_code=400, detail="Archivo vacío")
+        
+        logger.info(f"📤 Recibido archivo: {archivo.filename} ({len(contenido)} bytes)")
+        
+        # Procesar
+        db = get_database()
+        servicio_service = ServicioPrincipalService(db)
+        
+        # Primero debug
+        debug_info = servicio_service.debug_excel(contenido)
+        logger.info(f"🔍 Debug info: {debug_info.get('success', False)}")
+        
+        # Luego importar
+        resultado = servicio_service.importar_excel_servicios_historicos(contenido)
+        
+        # Preparar respuesta - AQUÍ ESTABA EL ERROR
+        respuesta = {
+            "success": True,
+            "archivo": archivo.filename,
+            "tamaño_bytes": len(contenido),
+            "procesado_en": datetime.now().isoformat(),  # ← NECESITA datetime IMPORTADO
+            "resultado": resultado,
+            "debug_info": debug_info if debug_info.get('success') else None
+        }
+        
+        logger.info(f"✅ Procesado: {resultado.get('servicios_creados', 0)} servicios creados")
+        
+        return respuesta
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error en endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno: {str(e)[:200]}"
+        )
+
+@router.post("/debug-excel")
+async def debug_excel_endpoint(
+    archivo: UploadFile = File(...)
+):
+    """
+    Solo analiza el Excel sin insertar
+    """
+    try:
+        contenido = await archivo.read()
+        
+        db = get_database()
+        servicio_service = ServicioPrincipalService(db)
+        
+        resultado = servicio_service.debug_excel(contenido)
+        
+        return {
+            "success": True,
+            "archivo": archivo.filename,
+            "debug_info": resultado
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en debug: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

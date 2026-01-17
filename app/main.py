@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("sistema-operador-logistico")
 
-    app = FastAPI(title="sistema-operador-logistico", version="0.1.0")
+    app = FastAPI(title="sistema-operador-logistico", version="0.1.0",swagger_ui_parameters={"syntaxHighlight": {"theme": "obsidian"}})
 
     
 

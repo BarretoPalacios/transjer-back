@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
+from datetime import datetime
 from app.core.database import get_database
 from app.modules.fletes.fletes_services import FleteService
 from app.modules.fletes.fletes_schemas import (
@@ -68,6 +69,83 @@ def listar_fletes(
     except Exception as e:
         logger.error(f"Error al listar fletes: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+@router.get("/advanced/search")
+def buscar_fletes_avanzado(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    
+    # Filtros de Flete
+    codigo_flete: Optional[str] = Query(None, description="Código del flete"),
+    estado_flete: Optional[str] = Query(None, description="Estado: PENDIENTE, VALORIZADO, etc."),
+    pertenece_a_factura: Optional[bool] = Query(None, description="Si está facturado o no"),
+    codigo_factura: Optional[str] = Query(None, description="Código de factura asociada"),
+    monto_min: Optional[float] = Query(None, description="Monto mínimo del flete"),
+    monto_max: Optional[float] = Query(None, description="Monto máximo del flete"),
+    
+    # Filtros del Servicio asociado
+    cliente: Optional[str] = Query(None, description="Nombre del cliente o razón social"),
+    placa: Optional[str] = Query(None, description="Placa del vehículo"),
+    conductor: Optional[str] = Query(None, description="Nombre del conductor"),
+    tipo_servicio: Optional[str] = Query(None, description="Tipo: REGULAR, URGENTE, etc."),
+    zona: Optional[str] = Query(None, description="Zona: LIMA, CALLAO, etc."),
+    estado_servicio: Optional[str] = Query(None, description="Estado del servicio: Completado, Programado, etc."),
+    
+    # Filtros de Fecha del Servicio
+    fecha_servicio_desde: Optional[datetime] = Query(None, description="Fecha de servicio desde (ISO format)"),
+    fecha_servicio_hasta: Optional[datetime] = Query(None, description="Fecha de servicio hasta (ISO format)"),
+    
+    # Filtros de Fecha del Flete
+    fecha_creacion_desde: Optional[datetime] = Query(None, description="Fecha de creación del flete desde"),
+    fecha_creacion_hasta: Optional[datetime] = Query(None, description="Fecha de creación del flete hasta")
+):
+    """
+    Búsqueda avanzada de fletes con información del servicio asociado.
+    
+    Permite filtrar por:
+    - Datos del flete (código, estado, monto, facturación)
+    - Datos del servicio (cliente, placa, conductor, zona, tipo)
+    - Rangos de fechas (del servicio y del flete)
+    
+    Retorna fletes con toda la información del servicio incluida.
+    """
+    try:
+        db = get_database()
+        flete_service = FleteService(db)
+        
+        result = flete_service.get_fletes_advanced(
+            # Filtros de Flete
+            codigo_flete=codigo_flete,
+            estado_flete=estado_flete,
+            pertenece_a_factura=pertenece_a_factura,
+            codigo_factura=codigo_factura,
+            monto_min=monto_min,
+            monto_max=monto_max,
+            
+            # Filtros del Servicio
+            cliente=cliente,
+            placa=placa,
+            conductor=conductor,
+            tipo_servicio=tipo_servicio,
+            zona=zona,
+            estado_servicio=estado_servicio,
+            
+            # Filtros de Fecha
+            fecha_servicio_desde=fecha_servicio_desde,
+            fecha_servicio_hasta=fecha_servicio_hasta,
+            fecha_creacion_desde=fecha_creacion_desde,
+            fecha_creacion_hasta=fecha_creacion_hasta,
+            
+            # Paginación
+            page=page,
+            page_size=page_size
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 @router.get("/{flete_id}", response_model=FleteResponse)
 def obtener_flete(flete_id: str):
