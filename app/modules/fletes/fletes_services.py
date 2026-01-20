@@ -520,6 +520,7 @@ class FleteService:
                         "zona": "$servicio.zona",
                         "fecha_servicio": "$servicio.fecha_servicio",
                         "fecha_salida": "$servicio.fecha_salida",
+                        "hora_cita": "$servicio.hora_cita",
                         "estado": "$servicio.estado",
                         "descripcion": "$servicio.descripcion",
                         "origen": "$servicio.origen",
