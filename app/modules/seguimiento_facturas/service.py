@@ -27,7 +27,8 @@ class FacturacionGestionService:
     def __init__(self, db):
         self.db = db
         self.collection = db["facturacion_gestion"]
-        self.facturas_collection = db["facturas"]
+        self.facturas_collection = db["facturacion"]
+        self.fletes_collection = db["fletes"]
     
     def create_gestion(self, gestion_data: dict) -> dict:
         """Crear nueva gestión de facturación"""
@@ -370,6 +371,9 @@ class FacturacionGestionService:
             if not gestion_actual:
                 return None
             
+            if gestion_actual.get("estado_pago_neto") == "ANULADO":
+                raise Exception("No se permiten modificaciones en facturas anuladas")
+            
             update_dict = {k: v for k, v in update_data.items() if v is not None}
             if not update_dict:
                 return gestion_actual
@@ -383,6 +387,52 @@ class FacturacionGestionService:
                     update_dict["monto_pagado_acumulado"] = monto_neto
                 elif estado == EstadoPagoNeto.PENDIENTE:
                     update_dict["monto_pagado_acumulado"] = Decimal("0")
+                elif estado == EstadoPagoNeto.ANULADO:
+                    # LÓGICA DE ANULACIÓN
+                    update_dict["monto_pagado_acumulado"] = Decimal("0")
+                    # Opcional: Si manejas un campo de 'valor_contable' o 'monto_neto' 
+                    # podrías decidir si lo pones en 0 o lo dejas para histórico.
+                    update_dict["monto_neto"] = Decimal("0")
+                    # Resetear estado de detracción si existe
+                    update_dict["estado_detraccion"] = EstadoDetraccion.NO_APLICA # O el valor que uses
+                    update_dict["fecha_pago_detraccion"] = None
+                    update_dict["fecha_probable_pago"] = None
+                    update_dict["tasa_detraccion"] = Decimal("0")
+                    update_dict["monto_detraccion"] = Decimal("0")
+                    
+                    numero_factura_comercial = gestion_actual.get("codigo_factura")
+                    # obs_actuales = gestion_actual.get("observaciones") or ""
+                    # update_dict["observaciones"] = f"{obs_actuales} [Factura ANULADA - Fletes Liberados]".strip()
+
+                    if numero_factura_comercial:
+                        factura_doc = self.facturas_collection.find_one({"numero_factura": numero_factura_comercial})
+                        
+                        if factura_doc:
+                            codigo_factura_interno = factura_doc.get("codigo_factura")
+                            
+                            # Actualizar Factura Base
+                            self.facturas_collection.update_one(
+                                {"numero_factura": numero_factura_comercial},
+                                {"$set": {
+                                    "estado": "Anulada",
+                                    "fecha_actualizacion": datetime.now()
+                                }}
+                            )
+
+                            # Liberar Fletes usando el código interno (FAC-...)
+                            if codigo_factura_interno:
+                                self.fletes_collection.update_many(
+                                    {"codigo_factura": codigo_factura_interno},
+                                    {"$set": {
+                                        "pertenece_a_factura": False,
+                                        "factura_id": None,
+                                        "codigo_factura": None,
+                                        "estado_flete": "VALORIZADO",
+                                        "fecha_actualizacion": datetime.now()
+                                    }}
+                                )
+                    
+
             
             # Lógica secundaria: Si se envía el monto, calcular el estado (si no se forzó arriba)
             elif "monto_pagado_acumulado" in update_dict:
@@ -418,6 +468,8 @@ class FacturacionGestionService:
         except Exception as e:
             logger.error(f"Error al actualizar gestión: {str(e)}")
             raise
+
+
     def delete_gestion(self, gestion_id: str) -> bool:
         """Eliminar gestión"""
         try:
