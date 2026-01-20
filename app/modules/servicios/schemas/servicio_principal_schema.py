@@ -259,6 +259,7 @@ class ServicioPrincipalConPermisos(BaseModel):
 
 
 class ServicioPrincipalFilter(BaseModel):
+    codigo_servicio_principal: Optional[str] = None
     mes: Optional[str] = None
     tipo_servicio: Optional[str] = None
     modalidad_servicio: Optional[str] = None

@@ -134,6 +134,8 @@ class ServicioPrincipalService:
             }
             
             if filter_params:
+                if filter_params.codigo_servicio_principal:
+                    query["codigo_servicio_principal"] = filter_params.codigo_servicio_principal
                 if filter_params.mes:
                     query["mes"] = filter_params.mes
                 
@@ -312,6 +314,24 @@ class ServicioPrincipalService:
         except Exception as e:
             logger.error(f"Error al obtener servicio: {str(e)}")
             return None
+
+    def get_servicio_by_codigo_principal(self, codigo_servicio: str) -> Optional[dict]:
+            try:
+                servicio = self.collection.find_one({
+                    "codigo_servicio_principal": codigo_servicio
+                })
+                
+                if servicio:
+                    servicio["id"] = str(servicio["_id"])
+                    del servicio["_id"]
+                    servicio = self._convert_datetime_to_date(servicio)
+                    return servicio
+                    
+                return None
+                
+            except Exception as e:
+                logger.error(f"Error al obtener servicio: {str(e)}")
+                return None
     
     def update_servicio(self, servicio_id: str, update_data: dict) -> Optional[dict]:
         try:

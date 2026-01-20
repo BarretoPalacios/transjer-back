@@ -489,7 +489,7 @@ class FleteService:
             total = count_result[0]["total"] if count_result else 0
             
             # 6. Ordenar, paginar y proyectar
-            pipeline.append({"$sort": {"fecha_creacion": -1}})
+            pipeline.append({"$sort": {"_id": -1}})
             
             skip = (page - 1) * page_size
             pipeline.append({"$skip": skip})

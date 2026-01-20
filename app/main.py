@@ -18,6 +18,7 @@ from app.modules.servicios_historicos.routes_servicios_historicos import router 
 from app.modules.fletes.fletes_routes import router as fletes_router
 from app.modules.seguimiento_facturas.router import router as seguimiento_facturas_router
 from app.modules.gastos_adicionales.router import router as gasto_router
+from app.modules.gastos.router import router as gasto
 
 
 
@@ -48,6 +49,9 @@ def create_app() -> FastAPI:
     app.include_router(historico_router)
     app.include_router(gasto_router)
     app.include_router(utils_router)
+  
+    app.include_router(gasto)
+
 
     app.include_router(servicioshistorico_router)
 

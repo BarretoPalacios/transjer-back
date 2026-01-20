@@ -42,6 +42,7 @@ def crear_servicio_principal(servicio: ServicioPrincipalCreate):
 
 @router.get("/", response_model=dict)
 def listar_servicios_principales(
+    codigo_servicio_principal: Optional[str] = Query(None),
     mes: Optional[str] = Query(None),
     tipo_servicio: Optional[str] = Query(None),
     modalidad_servicio: Optional[str] = Query(None),
@@ -91,6 +92,7 @@ def listar_servicios_principales(
         servicio_service = ServicioPrincipalService(db)
         
         filter_params = ServicioPrincipalFilter(
+            codigo_servicio_principal=codigo_servicio_principal,
             mes=mes,
             tipo_servicio=tipo_servicio,
             modalidad_servicio=modalidad_servicio,
@@ -144,6 +146,30 @@ def obtener_servicio_principal(servicio_id: str):
         logger.error(f"Error al obtener servicio: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
+@router.get("/codigo/{codigo_servicio}", response_model=ServicioPrincipalResponse)
+def obtener_servicio_principal_por_codigo(codigo_servicio: str):
+    try:
+        db = get_database()
+        servicio_service = ServicioPrincipalService(db)
+        
+        servicio = servicio_service.get_servicio_by_codigo_principal(codigo_servicio)
+        
+        if not servicio:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Servicio no encontrado con el código proporcionado"
+            )
+        
+        return servicio
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener servicio: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Error interno del servidor"
+        )
 
 @router.put("/{servicio_id}", response_model=ServicioPrincipalResponse)
 def actualizar_servicio_principal(servicio_id: str, servicio_update: ServicioPrincipalUpdate):

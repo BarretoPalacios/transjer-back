@@ -98,6 +98,7 @@ class FacturacionGestionService:
             logger.error(f"Error al obtener gestión: {str(e)}")
             return None
     
+    
     def get_gestion_by_codigo_factura(self, codigo_factura: str) -> Optional[dict]:
         """Obtener gestión por código de factura"""
         try:
@@ -125,7 +126,7 @@ class FacturacionGestionService:
             
             gestiones = list(
                 self.collection.find(query)
-                .sort("fecha_probable_pago", 1)
+                .sort("_id", -1)
                 .skip(skip)
                 .limit(page_size)
             )
