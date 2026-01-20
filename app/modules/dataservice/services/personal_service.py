@@ -11,6 +11,10 @@ import logging
 import json
 from math import ceil
 import re
+import io
+import pandas as pd
+import re
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
@@ -344,11 +348,10 @@ class PersonalService:
             logger.error(f"Error al exportar a Excel: {str(e)}")
             raise
     
+
     def import_from_excel(self, file_content: bytes) -> Dict[str, Any]:
-        """Importar personal desde Excel"""
+        """Importar personal desde Excel con limpieza de datos avanzada"""
         try:
-            import io
-            
             df = pd.read_excel(io.BytesIO(file_content))
             
             created = 0
@@ -358,9 +361,17 @@ class PersonalService:
             
             for index, row in df.iterrows():
                 try:
-                    # Construir datos del personal (campos obligatorios)
+                    # 1. Limpieza de DNI (Campo Obligatorio)
+                    dni_raw = str(row.get("DNI", "")).strip()
+                    # Quitar decimales si Excel lo leyó como float (ej. "7262962.0")
+                    dni_limpio = dni_raw.split('.')[0]
+                    # Rellenar con ceros a la izquierda si tiene menos de 8 dígitos
+                    if dni_limpio.isdigit():
+                        dni_limpio = dni_limpio.zfill(8)
+
+                    # Construir datos base
                     personal_data = {
-                        "dni": str(row.get("DNI", "")).strip(),
+                        "dni": dni_limpio,
                         "nombres_completos": str(row.get("Nombres Completos", "")).strip(),
                         "tipo": str(row.get("Tipo", "")).strip(),
                     }
@@ -387,99 +398,104 @@ class PersonalService:
                     
                     for campo_db, campo_excel in campos_opcionales.items():
                         valor = row.get(campo_excel)
-                        if pd.notna(valor) and str(valor).strip() and str(valor).strip().lower() != "nan":
-                            valor_limpio = str(valor).strip()
+                        
+                        # Saltar valores nulos o vacíos
+                        if pd.isna(valor) or str(valor).strip().lower() in ["nan", "none", ""]:
+                            continue
                             
-                            # Convertir campos especiales
-                            if campo_db in ["salario"]:
-                                try:
-                                    personal_data[campo_db] = float(valor_limpio)
-                                except (ValueError, TypeError):
-                                    personal_data[campo_db] = 0.0
-                            elif campo_db in ["fecha_ingreso", "fecha_nacimiento", "fecha_venc_licencia"]:
-                                try:
-                                    # Intentar parsear fecha
-                                    if isinstance(valor_limpio, (datetime, date)):
-                                        # Ya es una fecha
-                                        personal_data[campo_db] = valor_limpio
+                        valor_limpio = str(valor).strip()
+
+                        # A. Limpieza de EMAIL (Ignorar guiones)
+                        if campo_db == "email":
+                            if valor_limpio == "-":
+                                continue # No lo agregamos a personal_data
+                            personal_data[campo_db] = valor_limpio
+
+                        # B. Limpieza de SALARIO
+                        elif campo_db == "salario":
+                            try:
+                                personal_data[campo_db] = float(valor_limpio)
+                            except (ValueError, TypeError):
+                                personal_data[campo_db] = 0.0
+
+                        # C. Limpieza de FECHAS (El problema del 00:00:00)
+                        elif campo_db in ["fecha_ingreso", "fecha_nacimiento", "fecha_venc_licencia"]:
+                            try:
+                                # Si ya es un objeto datetime de pandas/python
+                                if isinstance(valor, (datetime, date)):
+                                    personal_data[campo_db] = valor
+                                else:
+                                    # Limpiar el string: "2025-06-13 00:00:00" -> "2025-06-13"
+                                    valor_str = valor_limpio.split(' ')[0].replace('.0', '')
+                                    formatos = ["%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"]
+                                    fecha_parseada = None
+                                    
+                                    for formato in formatos:
+                                        try:
+                                            fecha_parseada = datetime.strptime(valor_str, formato)
+                                            break
+                                        except ValueError:
+                                            continue
+                                    
+                                    if fecha_parseada:
+                                        personal_data[campo_db] = fecha_parseada
                                     else:
-                                        # Intentar parsear string a datetime
-                                        personal_data[campo_db] = datetime.strptime(valor_limpio, "%Y-%m-%d")
-                                except Exception as parse_error:
-                                    # Si no se puede parsear, intentar con otros formatos
-                                    try:
-                                        personal_data[campo_db] = datetime.strptime(valor_limpio, "%d/%m/%Y")
-                                    except:
-                                        errors.append(f"Fila {index + 2}: Formato de fecha inválido para {campo_excel}: {valor_limpio}")
-                                        continue
-                            else:
-                                personal_data[campo_db] = valor_limpio
-                    
-                    # Validar campos obligatorios
-                    if not personal_data.get("dni"):
-                        errors.append(f"Fila {index + 2}: DNI es requerido")
+                                        raise ValueError(f"Formato de fecha no reconocido: {valor_limpio}")
+                            except Exception as fe:
+                                errors.append(f"Fila {index + 2}: {campo_excel} inválida ({valor_limpio})")
+                                continue
+
+                        # D. Otros campos (Texto plano)
+                        else:
+                            personal_data[campo_db] = valor_limpio
+
+                    # --- VALIDACIONES FINALES ---
+                    if not personal_data.get("dni") or not personal_data.get("nombres_completos"):
+                        errors.append(f"Fila {index + 2}: DNI y Nombres son requeridos")
                         continue
                     
-                    if not personal_data.get("nombres_completos"):
-                        errors.append(f"Fila {index + 2}: Nombres completos son requeridos")
-                        continue
-                    
-                    if not personal_data.get("tipo"):
-                        errors.append(f"Fila {index + 2}: Tipo de personal es requerido")
-                        continue
-                    
-                    # Validar DNI (solo números)
                     if not re.match(r'^\d+$', personal_data["dni"]):
-                        errors.append(f"Fila {index + 2}: DNI debe contener solo números")
+                        errors.append(f"Fila {index + 2}: DNI debe ser numérico ({personal_data['dni']})")
                         continue
-                    
-                    # Validar tipo de personal
+
                     tipos_permitidos = ['Conductor', 'Auxiliar', 'Operario', 'Administrativo', 
-                                       'Supervisor', 'Mecánico', 'Almacenero']
+                                    'Supervisor', 'Mecánico', 'Almacenero']
                     if personal_data["tipo"] not in tipos_permitidos:
-                        errors.append(f"Fila {index + 2}: Tipo debe ser uno de: {', '.join(tipos_permitidos)}")
+                        errors.append(f"Fila {index + 2}: Tipo '{personal_data['tipo']}' no es válido")
                         continue
-                    
-                    # Estado por defecto
+
                     if not personal_data.get("estado"):
                         personal_data["estado"] = "Activo"
-                    
-                    # Verificar si ya existe por código (si viene en el Excel)
+
+                    # --- PERSISTENCIA (Update or Create) ---
+                    # 1. Por código si existe
                     codigo_excel = str(row.get("Código", "")).strip()
-                    if codigo_excel and codigo_excel not in ["", "nan", "None"]:
+                    if codigo_excel and codigo_excel.lower() not in ["", "nan", "none"]:
                         existing = self.collection.find_one({"codigo_personal": codigo_excel})
                         if existing:
-                            # Actualizar personal existente
-                            personal_data.pop("fecha_registro", None)  # No actualizar fecha de registro
-                            # Convertir fechas a datetime
-                            personal_data = self._convert_dates_to_datetime(personal_data)
-                            
+                            personal_data.pop("fecha_registro", None)
                             self.collection.update_one(
                                 {"codigo_personal": codigo_excel},
                                 {"$set": personal_data}
                             )
                             updated += 1
                             continue
-                    
-                    # Verificar si existe por DNI
-                    existing_dni = self.collection.find_one({
-                        "dni": personal_data["dni"]
-                    })
-                    
+
+                    # 2. Por DNI
+                    existing_dni = self.collection.find_one({"dni": personal_data["dni"]})
                     if existing_dni:
-                        # Personal duplicado, lo saltamos
                         skipped += 1
-                        errors.append(f"Fila {index + 2}: Personal duplicado - DNI {personal_data['dni']} ya existe")
+                        errors.append(f"Fila {index + 2}: El DNI {personal_data['dni']} ya existe en el sistema")
                         continue
-                    
-                    # Crear nuevo personal
+
+                    # 3. Crear nuevo
                     self.create_personal(personal_data)
                     created += 1
-                        
-                except Exception as e:
-                    errors.append(f"Fila {index + 2}: {str(e)}")
+
+                except Exception as row_error:
+                    errors.append(f"Fila {index + 2}: {str(row_error)}")
                     continue
-            
+
             return {
                 "total_rows": len(df),
                 "created": created,
@@ -489,9 +505,10 @@ class PersonalService:
                 "has_errors": len(errors) > 0,
                 "success_rate": f"{((created + updated) / len(df) * 100):.1f}%" if len(df) > 0 else "0%"
             }
-            
+
         except Exception as e:
-            logger.error(f"Error al importar desde Excel: {str(e)}")
+            # Aquí puedes usar logger.error si lo tienes configurado
+            print(f"Error crítico en import_from_excel: {str(e)}")
             raise
 
     def get_stats(self) -> Dict[str, Any]:
