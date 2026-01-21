@@ -198,3 +198,80 @@ def obtener_kpis_completos(
         logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
     
+@router.get("/resumen-por-placa")
+def obtener_resumen_por_placa(
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+    placa: Optional[str] = Query(None, description="Placa del vehículo (case-insensitive, opcional)"),
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio del servicio (YYYY-MM-DD) (opcional)"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin del servicio (YYYY-MM-DD) (opcional)")
+):
+    """
+    Obtiene resumen de servicios agrupados por placa de flota.
+    
+    Retorna: PLACA | TOTAL DE SERVICIOS | TOTAL VENDIDO
+    
+    Filtros opcionales:
+    - Sin filtros: Muestra todas las placas con sus totales
+    - Solo placa: Muestra solo esa placa específica
+    - Solo fechas: Muestra todas las placas en ese rango de fechas
+    - Placa y fechas: Muestra solo esa placa en ese rango de fechas
+    
+    Ejemplos:
+    - /gerencia/resumen-por-placa 
+      (todas las placas)
+    
+    - /gerencia/resumen-por-placa?placa=CDN-786 
+      (solo placa CDN-786, todas las fechas)
+    
+    - /gerencia/resumen-por-placa?fecha_inicio=2026-01-01&fecha_fin=2026-01-31 
+      (todas las placas en enero 2026)
+    
+    - /gerencia/resumen-por-placa?placa=CDN-786&fecha_inicio=2026-01-01&fecha_fin=2026-01-31
+      (placa CDN-786 en enero 2026)
+    """
+    try:
+        # Convertir fechas de string a datetime (si se proporcionan)
+        fecha_inicio_dt = None
+        fecha_fin_dt = None
+        
+        if fecha_inicio:
+            try:
+                fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Formato de fecha_inicio inválido. Use YYYY-MM-DD"
+                )
+        
+        if fecha_fin:
+            try:
+                fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+                # Ajustar fecha_fin al final del día
+                fecha_fin_dt = datetime.combine(fecha_fin_dt.date(), datetime.max.time())
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Formato de fecha_fin inválido. Use YYYY-MM-DD"
+                )
+        
+        # Validar rango de fechas
+        if fecha_inicio_dt and fecha_fin_dt and fecha_inicio_dt > fecha_fin_dt:
+            raise HTTPException(
+                status_code=400, 
+                detail="La fecha de inicio no puede ser mayor a la fecha de fin"
+            )
+        
+        # Llamar al servicio
+        resultado = gerencia_service.get_resumen_por_placa(
+            placa=placa,
+            fecha_inicio=fecha_inicio_dt,
+            fecha_fin=fecha_fin_dt
+        )
+        
+        return resultado
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener resumen por placa: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor")  
