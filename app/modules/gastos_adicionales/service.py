@@ -144,6 +144,9 @@ class GastoAdicionalService:
                 if filter_params.estado_aprobacion:
                     query["estado_aprobacion"] = filter_params.estado_aprobacion
 
+                if filter_params.numero_factura:
+                    query["numero_factura"] = safe_regex(filter_params.numero_factura)
+
                 if filter_params.usuario_registro:
                     query["usuario_registro"] = safe_regex(filter_params.usuario_registro)
 

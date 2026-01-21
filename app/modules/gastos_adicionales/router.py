@@ -44,6 +44,7 @@ def listar_gastos(
     estado_facturacion: Optional[str] = Query(None, description="Filtrar por estado de facturación"),
     estado_aprobacion: Optional[str] = Query(None, description="Filtrar por estado de aprobación"),
     usuario_registro: Optional[str] = Query(None, description="Filtrar por usuario que registró"),
+    numero_factura: Optional[str] = Query(None, description="Filtrar por numero de factura"),
     fecha_inicio: Optional[datetime] = Query(None, description="Filtrar por fecha inicio"),
     fecha_fin: Optional[datetime] = Query(None, description="Filtrar por fecha fin")
 ):
@@ -60,7 +61,8 @@ def listar_gastos(
             estado_aprobacion=estado_aprobacion,
             usuario_registro=usuario_registro,
             fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin
+            fecha_fin=fecha_fin,
+            numero_factura=numero_factura
         )
         
         result = gasto_service.get_all_gastos(filter_params, page, page_size)
