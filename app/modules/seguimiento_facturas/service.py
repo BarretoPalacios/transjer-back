@@ -17,7 +17,7 @@ from app.modules.seguimiento_facturas.schema import (
 import pandas as pd
 from io import BytesIO
 import logging
-import json
+# from math import ceil
 from math import ceil
 import re
 
@@ -29,6 +29,7 @@ class FacturacionGestionService:
         self.collection = db["facturacion_gestion"]
         self.facturas_collection = db["facturacion"]
         self.fletes_collection = db["fletes"]
+        self.servicios_collection = db["servicio_principal"]
     
     def create_gestion(self, gestion_data: dict) -> dict:
         """Crear nueva gestión de facturación"""
@@ -1032,6 +1033,314 @@ class FacturacionGestionService:
         except Exception as e:
             logger.error(f"Error en analítica avanzada: {e}")
             return {}
+        
+    def get_all_gestiones_advance(
+        self,
+        filter_params: Optional[FacturacionGestionFilter] = None,
+        page: int = 1,
+        page_size: int = 100
+    ) -> dict:
+        """Obtener gestiones con KPIs financieros y paginación"""
+        try:
+            # 1. Construir el filtro (Clientes y Rango de Fechas)
+            query = self._build_query(filter_params)
+            skip = (page - 1) * page_size
+
+            # 2. CÁLCULO SEPARADO: Total Vendido - TODOS los fletes valorizados
+            pipeline_vendido = [
+                {
+                    "$match": {
+                        "estado_flete": "VALORIZADO",
+                        "monto_flete": {"$gt": 0}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total": {"$sum": {"$toDouble": "$monto_flete"}},
+                        "count": {"$sum": 1}  # Para debug: ver cuántos fletes cuenta
+                    }
+                }
+            ]
+            
+            resultado_vendido = list(self.fletes_collection.aggregate(pipeline_vendido))
+            total_vendido = resultado_vendido[0]["total"] if resultado_vendido else 0
+            # Debug: ver cuántos fletes está contando
+            fletes_contados = resultado_vendido[0]["count"] if resultado_vendido else 0
+            logger.info(f"Total vendido: {total_vendido}, Fletes VALORIZADOS contados: {fletes_contados}")
+
+            # 3. Pipeline de Agregación para el resto de KPIs
+            pipeline = [
+                {"$match": query},
+                {
+                    "$facet": {
+                        # Rama 1: Cálculo de Totales (KPIs)
+                        "totales": [
+                            {
+                                "$group": {
+                                    "_id": None,
+                                    
+                                    # Suma directa de campos en la raíz
+                                    "total_facturado": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                                    "total_pagado_acumulado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                                    
+                                    # CALCULO DEL SALDO PENDIENTE (Monto Neto - Pagado Acumulado)
+                                    "total_pendiente_neto": {
+                                        "$sum": {
+                                            "$subtract": [
+                                                {"$toDouble": "$monto_neto"},
+                                                {"$toDouble": "$monto_pagado_acumulado"}
+                                            ]
+                                        }
+                                    },
+                                    
+                                    "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
+                                    
+                                    # Lógica de detracciones pagadas vs pendientes
+                                    "total_pagado_detracc": {
+                                        "$sum": {
+                                            "$cond": [
+                                                {"$and": [
+                                                    {"$ne": ["$fecha_pago_detraccion", None]},
+                                                    {"$ne": ["$fecha_pago_detraccion", ""]}
+                                                ]},
+                                                {"$toDouble": "$monto_detraccion"},
+                                                0
+                                            ]
+                                        }
+                                    },
+                                    "total_pendiente_detracc": {
+                                        "$sum": {
+                                            "$cond": [
+                                                {"$or": [
+                                                    {"$eq": ["$fecha_pago_detraccion", None]},
+                                                    {"$eq": ["$fecha_pago_detraccion", ""]}
+                                                ]},
+                                                {"$toDouble": "$monto_detraccion"},
+                                                0
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                        # Rama 2: Resultados Paginados
+                        "resultados": [
+                            {"$sort": {"_id": -1}},
+                            {"$skip": skip},
+                            {"$limit": page_size}
+                        ],
+                        # Rama 3: Conteo Total
+                        "conteo": [{"$count": "total"}]
+                    }
+                }
+            ]
+
+            result = list(self.collection.aggregate(pipeline))[0]
+
+            # 4. Extraer datos del Facet
+            totales_data = result["totales"][0] if result["totales"] else {}
+            items_raw = result["resultados"]
+            total_docs = result["conteo"][0]["total"] if result["conteo"] else 0
+            
+            formatted_gestiones = [self._format_gestion_response(g) for g in items_raw]
+            total_pages = ceil(total_docs / page_size) if page_size > 0 else 0
+
+            return {
+                "summary": {
+                    "total_vendido": total_vendido,  # Calculado por separado
+                    "total_facturado": totales_data.get("total_facturado", 0),
+                    "total_pagado": totales_data.get("total_pagado_acumulado", 0),
+                    "total_pendiente": totales_data.get("total_pendiente_neto", 0),
+                    "total_detracciones": totales_data.get("total_detracciones", 0),
+                    "total_pagado_detracc": totales_data.get("total_pagado_detracc", 0),
+                    "total_pendiente_detracc": totales_data.get("total_pendiente_detracc", 0)
+                },
+                "items": formatted_gestiones,
+                "total": total_docs,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+
+        except Exception as e:
+            logger.error(f"Error al obtener gestiones: {str(e)}")
+            raise
+
+    # def get_all_gestiones_advance(
+    #     self,
+    #     filter_params: Optional[FacturacionGestionFilter] = None,
+    #     page: int = 1,
+    #     page_size: int = 100
+    # ) -> dict:
+    #     """Obtener gestiones con KPIs financieros y paginación"""
+    #     try:
+    #         # 1. Construir el filtro (Clientes y Rango de Fechas)
+    #         query = self._build_query(filter_params)
+    #         skip = (page - 1) * page_size
+
+    #         # 2. CÁLCULO SEPARADO: Total Vendido
+    #         # 2.1 Fletes valorizados de las gestiones filtradas
+    #         gestiones_filtradas = list(self.collection.find(query, {"codigo_factura": 1}))
+    #         codigos_factura = [g["codigo_factura"] for g in gestiones_filtradas]
+            
+    #         facturas = list(self.facturas_collection.find(
+    #             {"numero_factura": {"$in": codigos_factura}},
+    #             {"_id": 1}
+    #         ))
+    #         facturas_ids = [str(f["_id"]) for f in facturas]
+            
+    #         # Fletes valorizados que pertenecen a facturas filtradas
+    #         pipeline_facturados = [
+    #             {
+    #                 "$match": {
+    #                     "factura_id": {"$in": facturas_ids},
+    #                     "estado_flete": "VALORIZADO",
+    #                     "monto_flete": {"$gt": 0}
+    #                 }
+    #             },
+    #             {
+    #                 "$group": {
+    #                     "_id": None,
+    #                     "total": {"$sum": {"$toDouble": "$monto_flete"}},
+    #                     "count": {"$sum": 1}
+    #                 }
+    #             }
+    #         ]
+            
+    #         resultado_facturados = list(self.fletes_collection.aggregate(pipeline_facturados))
+    #         total_facturados = resultado_facturados[0]["total"] if resultado_facturados else 0
+    #         count_facturados = resultado_facturados[0]["count"] if resultado_facturados else 0
+            
+    #         # 2.2 Fletes valorizados que NO pertenecen a ninguna factura (pertenece_a_factura = false)
+    #         pipeline_sin_factura = [
+    #             {
+    #                 "$match": {
+    #                     "pertenece_a_factura": False,
+    #                     "estado_flete": "VALORIZADO",
+    #                     "monto_flete": {"$gt": 0}
+    #                 }
+    #             },
+    #             {
+    #                 "$group": {
+    #                     "_id": None,
+    #                     "total": {"$sum": {"$toDouble": "$monto_flete"}},
+    #                     "count": {"$sum": 1}
+    #                 }
+    #             }
+    #         ]
+            
+    #         resultado_sin_factura = list(self.fletes_collection.aggregate(pipeline_sin_factura))
+    #         total_sin_factura = resultado_sin_factura[0]["total"] if resultado_sin_factura else 0
+    #         count_sin_factura = resultado_sin_factura[0]["count"] if resultado_sin_factura else 0
+            
+    #         # Total vendido = facturados filtrados + sin facturar
+    #         total_vendido = total_facturados + total_sin_factura
+    #         logger.info(f"Total vendido: {total_vendido} | Facturados: {total_facturados} ({count_facturados} fletes) | Sin factura: {total_sin_factura} ({count_sin_factura} fletes)")
+
+    #         # 3. Pipeline de Agregación para el resto de KPIs
+    #         pipeline = [
+    #             {"$match": query},
+    #             {
+    #                 "$facet": {
+    #                     # Rama 1: Cálculo de Totales (KPIs)
+    #                     "totales": [
+    #                         {
+    #                             "$group": {
+    #                                 "_id": None,
+                                    
+    #                                 # Suma directa de campos en la raíz
+    #                                 "total_facturado": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+    #                                 "total_pagado_acumulado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                                    
+    #                                 # CALCULO DEL SALDO PENDIENTE (Monto Neto - Pagado Acumulado)
+    #                                 "total_pendiente_neto": {
+    #                                     "$sum": {
+    #                                         "$subtract": [
+    #                                             {"$toDouble": "$monto_neto"},
+    #                                             {"$toDouble": "$monto_pagado_acumulado"}
+    #                                         ]
+    #                                     }
+    #                                 },
+                                    
+    #                                 "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
+                                    
+    #                                 # Lógica de detracciones pagadas vs pendientes
+    #                                 "total_pagado_detracc": {
+    #                                     "$sum": {
+    #                                         "$cond": [
+    #                                             {"$and": [
+    #                                                 {"$ne": ["$fecha_pago_detraccion", None]},
+    #                                                 {"$ne": ["$fecha_pago_detraccion", ""]}
+    #                                             ]},
+    #                                             {"$toDouble": "$monto_detraccion"},
+    #                                             0
+    #                                         ]
+    #                                     }
+    #                                 },
+    #                                 "total_pendiente_detracc": {
+    #                                     "$sum": {
+    #                                         "$cond": [
+    #                                             {"$or": [
+    #                                                 {"$eq": ["$fecha_pago_detraccion", None]},
+    #                                                 {"$eq": ["$fecha_pago_detraccion", ""]}
+    #                                             ]},
+    #                                             {"$toDouble": "$monto_detraccion"},
+    #                                             0
+    #                                         ]
+    #                                     }
+    #                                 }
+    #                             }
+    #                         }
+    #                     ],
+    #                     # Rama 2: Resultados Paginados
+    #                     "resultados": [
+    #                         {"$sort": {"_id": -1}},
+    #                         {"$skip": skip},
+    #                         {"$limit": page_size}
+    #                     ],
+    #                     # Rama 3: Conteo Total
+    #                     "conteo": [{"$count": "total"}]
+    #                 }
+    #             }
+    #         ]
+
+    #         result = list(self.collection.aggregate(pipeline))[0]
+
+    #         # 4. Extraer datos del Facet
+    #         totales_data = result["totales"][0] if result["totales"] else {}
+    #         items_raw = result["resultados"]
+    #         total_docs = result["conteo"][0]["total"] if result["conteo"] else 0
+            
+    #         formatted_gestiones = [self._format_gestion_response(g) for g in items_raw]
+    #         total_pages = ceil(total_docs / page_size) if page_size > 0 else 0
+
+    #         return {
+    #             "summary": {
+    #                 "total_vendido": total_vendido,  # Calculado por separado
+    #                 "total_facturado": totales_data.get("total_facturado", 0),
+    #                 "total_pagado": totales_data.get("total_pagado_acumulado", 0),
+    #                 "total_pendiente": totales_data.get("total_pendiente_neto", 0),
+    #                 "total_detracciones": totales_data.get("total_detracciones", 0),
+    #                 "total_pagado_detracc": totales_data.get("total_pagado_detracc", 0),
+    #                 "total_pendiente_detracc": totales_data.get("total_pendiente_detracc", 0)
+    #             },
+    #             "items": formatted_gestiones,
+    #             "total": total_docs,
+    #             "page": page,
+    #             "page_size": page_size,
+    #             "total_pages": total_pages,
+    #             "has_next": page < total_pages,
+    #             "has_prev": page > 1
+    #         }
+
+    #     except Exception as e:
+    #         logger.error(f"Error al obtener gestiones: {str(e)}")
+    #         raise
+
+
 def safe_regex(value: str):
     """Crear expresión regular segura para búsquedas"""
     if not value:

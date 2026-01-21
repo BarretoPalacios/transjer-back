@@ -201,3 +201,24 @@ class PaginatedResponse(BaseModel, Generic[T]):
     total_pages: int
     has_next: bool
     has_prev: bool
+
+
+
+class SummaryKpis(BaseModel):
+    total_vendido: float = Field(default=0.0)
+    total_facturado: float = Field(default=0.0)
+    total_pagado: float = Field(default=0.0)
+    total_pendiente: float = Field(default=0.0)
+    total_detracciones: float = Field(default=0.0)
+    total_pagado_detracc: float = Field(default=0.0)
+    total_pendiente_detracc: float = Field(default=0.0)
+
+class FacturacionGestionSummaryResponse(BaseModel):
+    summary: SummaryKpis  # <--- Aquí están los totales para las tarjetas del Dashboard
+    items: List[FacturacionGestionResponse] # <--- La lista para la tabla
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool

@@ -15,7 +15,8 @@ from app.modules.seguimiento_facturas.schema import (
     PaginatedResponse,
     EstadoPagoNeto,
     EstadoDetraccion,
-    PrioridadPago
+    PrioridadPago,
+    FacturacionGestionSummaryResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -661,3 +662,43 @@ def obtener_analytics_avanzadas(timeframe: str = "month"):
     except Exception as e:
         logger.error(f"Error al obtener analíticas avanzadas: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+    
+@router.get("/advance-list/")
+def listar_gestiones_con_info_advance(
+    # Parámetros de paginación (Cambiado default a 100)
+    page: int = Query(default=1, ge=1, description="Número de página"),
+    page_size: int = Query(default=100, ge=1, le=500, description="Elementos por página"),
+    
+    # Filtros de entidades (Los que pediste priorizar)
+    nombre_cliente: Optional[str] = Query(None, description="Filtrar por nombre de cliente"),
+    fecha_servicio_inicio: Optional[date] = Query(None, description="Fecha servicio inicial"),
+    fecha_servicio_fin: Optional[date] = Query(None, description="Fecha servicio final"),
+
+    
+):
+    """
+    Obtener gestiones con KPIs financieros y lista paginada.
+    Retorna totales de: Vendido, Facturado, Pagado, Pendiente y Detracciones.
+    """
+    try:
+        db = get_database()
+        gestion_service = FacturacionGestionService(db)
+        
+        # Agrupamos los parámetros en el objeto de filtro
+        filter_params = FacturacionGestionFilter(
+            nombre_cliente=nombre_cliente,
+            fecha_servicio_inicio=fecha_servicio_inicio,
+            fecha_servicio_fin=fecha_servicio_fin,
+        )
+        
+        result = gestion_service.get_all_gestiones_advance(filter_params, page, page_size)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error al listar gestiones: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error interno al procesar la consulta: {str(e)}"
+        )
+    
