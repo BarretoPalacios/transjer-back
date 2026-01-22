@@ -55,6 +55,8 @@ def listar_facturas(
     monto_total_maximo: Optional[Decimal] = Query(None, description="Monto total máximo"),
     
     flete_id: Optional[str] = Query(None, description="Filtrar por ID de flete"),
+
+    nombre_cliente: Optional[str] = Query(None, description="Filtrar por nombre de cliente"),
     
     page: int = Query(1, ge=1, description="Número de página"),
     page_size: int = Query(10, ge=1, le=100, description="Cantidad de registros por página"),
@@ -89,7 +91,8 @@ def listar_facturas(
             fecha_pago_fin=fecha_pago_fin,
             monto_total_minimo=monto_total_minimo,
             monto_total_maximo=monto_total_maximo,
-            flete_id=flete_id
+            flete_id=flete_id,
+            nombre_cliente=nombre_cliente
         )
         
         result = facturacion_service.get_all_facturas(

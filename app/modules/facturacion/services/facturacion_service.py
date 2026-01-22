@@ -43,17 +43,28 @@
 #         return converted_data
     
 #     def _populate_fletes(self, factura: dict) -> dict:
-#         """Poblar información completa de los fletes"""
+#         """Poblar información completa de los fletes y sus servicios"""
 #         if "fletes" in factura and isinstance(factura["fletes"], list):
 #             fletes_populated = []
 #             for flete_ref in factura["fletes"]:
 #                 if isinstance(flete_ref, dict) and "id" in flete_ref:
 #                     flete_id = flete_ref["id"]
+                    
 #                     if ObjectId.is_valid(flete_id):
+#                         # Buscar el flete completo
 #                         flete_data = self.fletes_collection.find_one({"_id": ObjectId(flete_id)})
+                        
 #                         if flete_data:
 #                             flete_data["id"] = str(flete_data["_id"])
 #                             del flete_data["_id"]
+                            
+#                             # Buscar y agregar información del servicio si existe
+#                             if "servicio_id" in flete_data and flete_data["servicio_id"]:
+#                                 servicio_id = flete_data["servicio_id"]
+#                                 flete_data["servicio"] = self._get_servicio_basico(servicio_id)
+#                             else:
+#                                 flete_data["servicio"] = {}
+                            
 #                             fletes_populated.append(flete_data)
 #                         else:
 #                             fletes_populated.append(flete_ref)
@@ -66,6 +77,38 @@
         
 #         return factura
     
+#     def _get_servicio_basico(self, servicio_id: str) -> dict:
+#         """Obtener información básica de un servicio por ID"""
+#         try:
+#             if not ObjectId.is_valid(servicio_id):
+#                 return {}
+            
+#             servicio_collection = self.db["servicio_principal"]
+#             servicio_doc = servicio_collection.find_one({"_id": ObjectId(servicio_id)})
+            
+#             if not servicio_doc:
+#                 return {}
+            
+#             # Extraer solo los campos necesarios
+#             return {
+#                 "codigo_servicio": servicio_doc.get("codigo_servicio_principal", ""),
+#                 "cliente": servicio_doc.get("cliente", {}),
+#                 "fecha_servicio": servicio_doc.get("fecha_servicio"),
+#                 "fecha_salida": servicio_doc.get("fecha_salida"),
+#                 "tipo_servicio": servicio_doc.get("tipo_servicio", ""),
+#                 "modalidad": servicio_doc.get("modalidad_servicio", ""),
+#                 "zona": servicio_doc.get("zona", ""),
+#                 "origen": servicio_doc.get("origen", ""),
+#                 "destino": servicio_doc.get("destino", ""),
+#                 "m3": servicio_doc.get("m3", ""),
+#                 "tn": servicio_doc.get("tn", ""),
+#                 "gia_rr": servicio_doc.get("gia_rr"),
+#                 "gia_rt": servicio_doc.get("gia_rt")
+#             }
+#         except Exception as e:
+#             logger.error(f"Error al obtener servicio básico: {str(e)}")
+#             return {}
+
 #     def _build_query(self, filter_params: Optional[FacturacionFilter] = None) -> dict:
 #         query = {}
         
@@ -264,7 +307,7 @@
 #             facturas_list = list(
 #                 self.collection
 #                 .find(query)
-#                 .sort(sort_by, sort_order)
+#                 .sort("numero_factura", sort_order)
 #                 .skip(skip)
 #                 .limit(page_size)
 #             )
@@ -938,7 +981,6 @@
 
 
 
-
 from typing import List, Optional, Dict, Any
 from bson import ObjectId
 from app.modules.utils.core.code_generator.code_generator import generate_sequential_code
@@ -1054,6 +1096,30 @@ class FacturacionService:
         query = {}
         
         if filter_params:
+            if filter_params.nombre_cliente:
+                # Primero, buscar los servicios que coincidan con el cliente
+                servicios_collection = self.db["servicio_principal"]
+                servicios_matching = servicios_collection.find(
+                    {"cliente.nombre": {"$regex": filter_params.nombre_cliente, "$options": "i"}}
+                )
+                servicio_ids = [str(s["_id"]) for s in servicios_matching]
+                
+                if servicio_ids:
+                    # Luego, buscar los fletes de esos servicios
+                    fletes_matching = self.fletes_collection.find(
+                        {"servicio_id": {"$in": servicio_ids}}
+                    )
+                    flete_ids = [str(f["_id"]) for f in fletes_matching]
+                    
+                    if flete_ids:
+                        # Finalmente, filtrar facturas que contengan esos fletes
+                        query["fletes.id"] = {"$in": flete_ids}
+                    else:
+                        # No hay fletes que coincidan, retornar query que no dará resultados
+                        query["_id"] = {"$exists": False}
+                else:
+                    # No hay servicios que coincidan, retornar query que no dará resultados
+                    query["_id"] = {"$exists": False}
             if filter_params.numero_factura:
                 query["numero_factura"] = {"$regex": filter_params.numero_factura, "$options": "i"}
             
@@ -1248,7 +1314,7 @@ class FacturacionService:
             facturas_list = list(
                 self.collection
                 .find(query)
-                .sort(sort_by, sort_order)
+                .sort("numero_factura", sort_order)
                 .skip(skip)
                 .limit(page_size)
             )

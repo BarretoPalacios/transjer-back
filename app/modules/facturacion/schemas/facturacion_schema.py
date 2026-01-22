@@ -110,6 +110,8 @@ class FacturacionFilter(BaseModel):
     
     periodo: Optional[str] = None
     
+    nombre_cliente: Optional[str] = None
+
     class Config:
         from_attributes = True
 

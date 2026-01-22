@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request,Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import uvicorn
+from app.modules.auth.utils.dependencies import get_current_user
+from contextlib import asynccontextmanager
+from app.core.seed_data import SeedService
 from app.core.database import get_database,connect_to_mongo
 from app.modules.utils.routers.router import router as utils_router
 from app.modules.auth.routers import auth, users, roles, permissions
@@ -21,13 +24,13 @@ from app.modules.gastos_adicionales.router import router as gasto_router
 from app.modules.gastos.router import router as gasto
 from app.modules.gerencia.router import router as gerencia
 
-
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("sistema-operador-logistico")
 
 def create_app() -> FastAPI:
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("sistema-operador-logistico")
 
-    app = FastAPI(title="sistema-operador-logistico", version="0.1.0",swagger_ui_parameters={"syntaxHighlight": {"theme": "obsidian"}})
+
+    app = FastAPI(title="sistema-operador-logistico", version="0.1.0",lifespan=lifespan,swagger_ui_parameters={"syntaxHighlight": {"theme": "obsidian"}})
 
     
 
@@ -37,24 +40,24 @@ def create_app() -> FastAPI:
     app.include_router(permissions.router)
 
     
-    app.include_router(cliente_router)
-    app.include_router(proveedor_router)
-    app.include_router(personal_router)
-    app.include_router(flota_router)
-    app.include_router(servici_principal_router)
-    app.include_router(fletes_router)
+    app.include_router(cliente_router,dependencies=[Depends(get_current_user)])
+    app.include_router(proveedor_router,dependencies=[Depends(get_current_user)])
+    app.include_router(personal_router,dependencies=[Depends(get_current_user)])
+    app.include_router(flota_router,dependencies=[Depends(get_current_user)])
+    app.include_router(servici_principal_router,dependencies=[Depends(get_current_user)])
+    app.include_router(fletes_router,dependencies=[Depends(get_current_user)])
 
-    app.include_router(facturacion_router)
-    app.include_router(seguimiento_facturas_router)
+    app.include_router(facturacion_router,dependencies=[Depends(get_current_user)])
+    app.include_router(seguimiento_facturas_router,dependencies=[Depends(get_current_user)])
 
-    app.include_router(historico_router)
-    app.include_router(gasto_router)
-    app.include_router(utils_router)
+    app.include_router(historico_router,dependencies=[Depends(get_current_user)])
+    app.include_router(gasto_router,dependencies=[Depends(get_current_user)])
+    app.include_router(utils_router,dependencies=[Depends(get_current_user)])
   
-    app.include_router(gasto)
-    app.include_router(gerencia)
+    app.include_router(gasto,dependencies=[Depends(get_current_user)])
+    app.include_router(gerencia,dependencies=[Depends(get_current_user)])
 
-    app.include_router(servicioshistorico_router)
+    app.include_router(servicioshistorico_router,dependencies=[Depends(get_current_user)])
 
 
 
@@ -69,15 +72,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Simple request logging middleware
-    @app.middleware("http")
-    async def log_requests(request: Request, call_next):
-        logger.info(f"--> {request.method} {request.url.path}")
-        response = await call_next(request)
-        logger.info(f"<-- {request.method} {request.url.path} {response.status_code}")
-        return response
-
-
     @app.get("/", tags=["root"])
     async def read_root():
         return {"message": "sistema-operador-logistico API"}
@@ -88,6 +82,52 @@ def create_app() -> FastAPI:
         return {"status": res}
 
     return app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+        """
+        Lifespan context manager para manejar eventos de inicio y cierre
+        """
+        # Startup
+        logger.info("Iniciando aplicación...")
+        
+        # Inicializar datos si no existen
+        await initialize_database()
+        
+        yield
+        
+        # Shutdown
+        logger.info("Cerrando aplicación...")
+
+async def initialize_database():
+        """
+        Inicializa la base de datos con datos por defecto si está vacía
+        """
+        try:
+            # Obtener conexión a la base de datos
+            db = get_database()
+            seed_service = SeedService(db)
+            
+            # Verificar si ya hay datos
+            counts = seed_service.check_existing_data()
+            
+            if counts["users"] == 0:
+                logger.info("Base de datos vacía, creando datos iniciales...")
+                result = seed_service.create_initial_data()
+                
+                if result["success"]:
+                    logger.info("✓ Datos iniciales creados automáticamente")
+                    logger.info(f"  Usuarios: {result['counts']['users']}")
+                    logger.info(f"  Roles: {result['counts']['roles']}")
+                    logger.info(f"  Permisos: {result['counts']['permissions']}")
+                else:
+                    logger.error(f"✗ Error creando datos iniciales: {result.get('error')}")
+            else:
+                logger.info(f"Base de datos ya tiene {counts['users']} usuarios")
+                
+        except Exception as e:
+            logger.error(f"Error inicializando base de datos: {str(e)}")
+
 
 app = create_app()
 

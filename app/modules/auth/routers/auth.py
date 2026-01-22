@@ -4,11 +4,13 @@ from app.modules.auth.schemas.user import UserCreate, UserResponse
 from app.modules.auth.services.auth_service import AuthService
 from app.modules.auth.services.user_service import UserService
 from app.core.database import get_database
+from app.modules.auth.utils.dependencies import require_role
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+
 @router.post("/register", response_model=UserResponse)
-def register(user: UserCreate):
+def register(user: UserCreate, current_user: dict = Depends(require_role(["administrador"]))):
     db = get_database()
     user_service = UserService(db)
     
@@ -17,6 +19,9 @@ def register(user: UserCreate):
         return created_user
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        # raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/login", response_model=Token)
 def login(credentials: LoginRequest):
