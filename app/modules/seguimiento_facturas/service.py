@@ -30,6 +30,7 @@ class FacturacionGestionService:
         self.facturas_collection = db["facturacion"]
         self.fletes_collection = db["fletes"]
         self.servicios_collection = db["servicio_principal"]
+        self.config_collection = db["sistema_config"]
     
     def create_gestion(self, gestion_data: dict) -> dict:
         """Crear nueva gestión de facturación"""
@@ -551,19 +552,22 @@ class FacturacionGestionService:
     
     def get_dashboard_stats(self, cliente_nombre: str = None) -> Dict[str, Any]:
         try:
-            hoy_dt = datetime.combine(datetime.now().date(), time.min)
-            hoy_str = hoy_dt.strftime("%Y-%m-%d")
+            # 1. Preparar fecha actual para comparación (como objeto datetime)
+            hoy = datetime.combine(datetime.now().date(), time.min)
 
-            # 1. Definimos qué estados NO deben sumar dinero (Anuladas)
-            estado_anulado = "Anulado" # Asegúrate de que coincida con tu DB
+            # Definimos estado anulado
+            estado_anulado = "Anulado"
 
             pipeline = [
-                # Filtro inicial opcional por cliente
-                { "$match": {"datos_completos.fletes.servicio.nombre_cliente": cliente_nombre} if cliente_nombre else {} },
+                # Filtro inicial por cliente (Buscando dentro del array de fletes)
+                { 
+                    "$match": {
+                        "datos_completos.fletes.servicio.nombre_cliente": cliente_nombre
+                    } if cliente_nombre else {} 
+                },
                 
                 {
                     "$facet": {
-                        # Conteo general (incluye todo para saber qué pasó)
                         "metricas_globales": [
                             {"$group": {
                                 "_id": None,
@@ -576,22 +580,39 @@ class FacturacionGestionService:
                         "por_estado_pago": [
                             {"$group": {"_id": "$estado_pago_neto", "count": {"$sum": 1}}}
                         ],
-                        # CÁLCULOS FINANCIEROS (Solo facturas NO anuladas)
                         "financiero": [
+                            # Solo facturas NO anuladas para los totales de dinero
                             { "$match": { "estado_pago_neto": { "$ne": estado_anulado } } },
                             {
-                                "$group": {
+                                "$group": { 
                                     "_id": None,
-                                    "neto": {"$sum": {"$toDouble": "$monto_neto"}},
-                                    "pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
-                                    "detraccion": {"$sum": {"$toDouble": "$monto_detraccion"}},
-                                    # Solo sumamos vencidas aquí dentro para asegurar que NO sean anuladas
-                                    "vencidas_count": {
+                                    "total_facturado": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                                    "total_neto": {"$sum": {"$toDouble": "$monto_neto"}},
+                                    "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                                    "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
+                                    # Monto pendiente de facturas cuya fecha de vencimiento ya pasó
+                                    "total_pendiente_vencido": {
                                         "$sum": {
                                             "$cond": [
                                                 { "$and": [
-                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy_str] },
-                                                    { "$in": ["$estado_pago_neto", ["Pendiente", "Pagado Parcial"]]}
+                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$ne": ["$estado_pago_neto", "Pagado"] }
+                                                ]},
+                                                # Restamos lo que falta pagar de esa factura específica
+                                                { "$subtract": [ 
+                                                    {"$toDouble": "$monto_neto"}, 
+                                                    {"$toDouble": "$monto_pagado_acumulado"} 
+                                                ]},
+                                                0
+                                            ]
+                                        }
+                                    },
+                                    "count_vencidas": {
+                                        "$sum": {
+                                            "$cond": [
+                                                { "$and": [
+                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$ne": ["$estado_pago_neto", "Pagado"] }
                                                 ]},
                                                 1, 0
                                             ]
@@ -604,34 +625,43 @@ class FacturacionGestionService:
                 }
             ]
 
-            result = list(self.collection.aggregate(pipeline))[0]
+            raw_result = list(self.collection.aggregate(pipeline))
+            if not raw_result:
+                return {}
+                
+            result = raw_result[0]
 
-            # --- Extracción segura de datos ---
+            # --- Extracción y Conversión ---
             globales = result["metricas_globales"][0] if result["metricas_globales"] else {}
             fin = result["financiero"][0] if result["financiero"] else {}
             
-            total_neto = Decimal(str(fin.get("neto") or "0"))
-            total_pagado = Decimal(str(fin.get("pagado") or "0"))
-            total_detraccion = Decimal(str(fin.get("detraccion") or "0"))
+            # Valores Decimal para precisión financiera
+            facturado = Decimal(str(fin.get("total_facturado") or "0"))
+            neto = Decimal(str(fin.get("total_neto") or "0"))
+            pagado = Decimal(str(fin.get("total_pagado") or "0"))
+            detraccion = Decimal(str(fin.get("total_detracciones") or "0"))
+            pendiente_vencido = Decimal(str(fin.get("total_pendiente_vencido") or "0"))
             
-            # El saldo pendiente real es lo que falta por pagar de facturas NO anuladas
-            saldo_pendiente = total_neto - total_pagado
+            # El pendiente total es Neto - Pagado (de facturas no anuladas)
+            saldo_pendiente_total = neto - pagado
 
             return {
                 "total_gestiones": globales.get("total_items", 0),
                 "cant_anuladas": globales.get("total_anuladas", 0),
-                "vencidas": fin.get("vencidas_count", 0),
+                "cant_vencidas": fin.get("count_vencidas", 0),
                 "por_estado_pago": {str(r["_id"]): r["count"] for r in result["por_estado_pago"]},
                 "montos_totales": {
-                    "neto": f"{total_neto:,.2f}",
-                    "pagado": f"{total_pagado:,.2f}",
-                    "detraccion": f"{total_detraccion:,.2f}",
-                    "pendiente": f"{saldo_pendiente:,.2f}"
+                    "total_facturado": f"{facturado:,.2f}",
+                    "total_pagado": f"{pagado:,.2f}",
+                    "total_detracciones": f"{detraccion:,.2f}",
+                    "total_pendiente": f"{saldo_pendiente_total:,.2f}",
+                    "total_pendiente_vencido": f"{pendiente_vencido:,.2f}"
                 }
             }
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error en dashboard: {e}")
             return {}
+
     def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
         """Exportar gestiones a Excel con datos completos de snapshots"""
         try:
@@ -1042,6 +1072,7 @@ class FacturacionGestionService:
         page: int = 1,
         page_size: int = 100
     ) -> dict:
+        
         """Obtener gestiones con KPIs financieros y paginación"""
         try:
             # 1. Construir el filtro (Clientes y Rango de Fechas)
@@ -1206,6 +1237,35 @@ class FacturacionGestionService:
         except Exception as e:
             logger.error(f"Error al obtener gestiones: {str(e)}")
             raise
+
+    def _actualizar_vencimientos_automaticos(self):
+
+        try:
+                ahora = datetime.now()
+                
+                filtro = {
+                        "datos_completos.fecha_vencimiento": {"$lt": ahora},
+                        "estado_pago_neto": "Pendiente"
+                    }
+                
+                # 3. Ejecutar la actualización masiva
+                resultado = self.collection.update_many(
+                    filtro, 
+                    {
+                        "$set": {
+                            "estado_pago_neto": "Vencido",
+                            "ultima_actualizacion": ahora
+                        }
+                    }
+                )
+                
+                if resultado.modified_count > 0:
+                    print(f"Sincronización exitosa: {resultado.modified_count} facturas pasaron a Vencida.")
+                
+
+        except Exception as e:
+            # Usamos print o tu logger si está configurado
+            print(f"Error  al actualizar vencimientos: {str(e)}")
 
 
 def safe_regex(value: str):

@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request,Depends
+from apscheduler.schedulers.background import BackgroundScheduler
+from app.modules.seguimiento_facturas.service import FacturacionGestionService
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import uvicorn
@@ -94,6 +96,26 @@ async def lifespan(app: FastAPI):
         # Inicializar datos si no existen
         await initialize_database()
         
+        # 2. Configurar la Bachera (APScheduler)
+        db = get_database()
+        gestion_service = FacturacionGestionService(db)
+        
+        scheduler = BackgroundScheduler()
+        
+        # Programamos la tarea: Se ejecuta todos los días a las 00:01 AM
+        # También puedes usar (minutes=60) para pruebas
+        scheduler.add_job(
+            gestion_service._actualizar_vencimientos_automaticos, 
+            'cron', 
+            hour=0, 
+            minute=1,
+            id="check_vencimientos"
+        )
+        
+        scheduler.start()
+        logger.info("✓ Bachera de vencimientos programada correctamente")
+
+
         yield
         
         # Shutdown

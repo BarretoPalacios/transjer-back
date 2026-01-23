@@ -459,7 +459,7 @@ class PersonalService:
                         continue
 
                     tipos_permitidos = ['Conductor', 'Auxiliar', 'Operario', 'Administrativo', 
-                                    'Supervisor', 'Mecánico', 'Almacenero']
+                                    'Supervisor', 'Mecánico', 'Almacenero','Oficina']
                     if personal_data["tipo"] not in tipos_permitidos:
                         errors.append(f"Fila {index + 2}: Tipo '{personal_data['tipo']}' no es válido")
                         continue
