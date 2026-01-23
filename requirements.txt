@@ -1,6 +1,7 @@
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.0
+APScheduler==3.11.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
 certifi==2025.11.12
@@ -15,6 +16,7 @@ et_xmlfile==2.0.0
 fastapi==0.123.0
 fastapi-cli==0.0.16
 fastapi-cloud-cli==0.5.2
+fastapi-swagger-dark==0.0.9
 fastar==0.8.0
 h11==0.16.0
 httpcore==1.0.9
@@ -55,6 +57,7 @@ typer==0.20.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2025.2
+tzlocal==5.3.1
 urllib3==2.5.0
 uvicorn==0.38.0
 watchfiles==1.1.1
