@@ -7,7 +7,7 @@ class Flota(BaseModel):
     placa: str = Field(..., min_length=6, max_length=10, description="Placa del vehículo")
     marca: str = Field(..., min_length=2, max_length=50, description="Marca del vehículo")
     modelo: str = Field(..., min_length=1, max_length=50, description="Modelo del vehículo")
-    anio: int = Field(..., ge=1990, le=2025, description="Año de fabricación")
+    anio: int = Field(..., ge=1990, le=2050, description="Año de fabricación")
     tn: float = Field(..., ge=0, description="Capacidad de carga en toneladas")
     m3: float = Field(..., ge=0, description="Capacidad volumétrica en metros cúbicos")
     tipo_vehiculo: str = Field(..., description="Volquete, Furgón, Plataforma, Tanque, Cisterna, etc.")
