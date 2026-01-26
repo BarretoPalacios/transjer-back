@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta , time
 from typing import Dict, Any, Optional, List
 from pymongo.collection import Collection
 from math import ceil
@@ -212,6 +212,8 @@ class GerenciaService:
         Obtiene todos los KPIs financieros: total vendido, facturado, pagado, pendiente, etc.
         """
         try:
+            # NUEVO
+            hoy = datetime.combine(datetime.now().date(), time.min)
             # 1. Construir el filtro para facturacion_gestion (case-insensitive)
             query = {}
             
@@ -266,6 +268,36 @@ class GerenciaService:
                                             "$subtract": [
                                                 {"$toDouble": "$monto_neto"},
                                                 {"$toDouble": "$monto_pagado_acumulado"}
+                                            ]
+                                        }
+                                    },
+                                    # NUEVO: Lógica de Vencidos (Monto)
+                                    "total_pendiente_vencido": {
+                                        "$sum": {
+                                            "$cond": [
+                                                { "$and": [
+                                                    { "$lte": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$ne": ["$estado_pago_neto", "Pagado"] },
+                                                    { "$ne": ["$estado_pago_neto", "Anulado"] }
+                                                ]},
+                                                { "$subtract": [
+                                                    {"$toDouble": "$monto_neto"},
+                                                    {"$toDouble": "$monto_pagado_acumulado"}
+                                                ]},
+                                                0
+                                            ]
+                                        }
+                                    },
+                                    # NUEVO: Lógica de Vencidos (Conteo)
+                                    "count_vencidas": {
+                                        "$sum": {
+                                            "$cond": [
+                                                { "$and": [
+                                                    { "$lte": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$ne": ["$estado_pago_neto", "Pagado"] },
+                                                    { "$ne": ["$estado_pago_neto", "Anulado"] }
+                                                ]},
+                                                1, 0
                                             ]
                                         }
                                     },
@@ -401,6 +433,10 @@ class GerenciaService:
                     "total_detracciones": float(totales_data.get("total_detracciones", 0)),
                     "total_pagado_detracc": float(totales_data.get("total_pagado_detracc", 0)),
                     "total_pendiente_detracc": float(totales_data.get("total_pendiente_detracc", 0)),
+
+                    # NUEVO: KPIs de Vencimiento
+                    "total_pendiente_vencido": float(totales_data.get("total_pendiente_vencido", 0)),
+                    "cantidad_vencidas": totales_data.get("count_vencidas", 0),
                     
                     # Métricas adicionales
                     "total_facturas": totales_data.get("total_facturas", 0),
@@ -428,6 +464,7 @@ class GerenciaService:
         except Exception as e:
             logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
             raise
+
 
     def _format_gestion_response(self, gestion: dict) -> dict:
         """

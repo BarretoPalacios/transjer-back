@@ -595,7 +595,7 @@ class FacturacionGestionService:
                                         "$sum": {
                                             "$cond": [
                                                 { "$and": [
-                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$lte": ["$datos_completos.fecha_vencimiento", hoy] },
                                                     { "$ne": ["$estado_pago_neto", "Pagado"] }
                                                 ]},
                                                 # Restamos lo que falta pagar de esa factura específica
@@ -611,7 +611,7 @@ class FacturacionGestionService:
                                         "$sum": {
                                             "$cond": [
                                                 { "$and": [
-                                                    { "$lt": ["$datos_completos.fecha_vencimiento", hoy] },
+                                                    { "$lte": ["$datos_completos.fecha_vencimiento", hoy] },
                                                     { "$ne": ["$estado_pago_neto", "Pagado"] }
                                                 ]},
                                                 1, 0
@@ -1064,8 +1064,6 @@ class FacturacionGestionService:
             logger.error(f"Error en analítica avanzada: {e}")
             return {}
         
-
-
     def get_all_gestiones_advance(
         self,
         filter_params: Optional[FacturacionGestionFilter] = None,
