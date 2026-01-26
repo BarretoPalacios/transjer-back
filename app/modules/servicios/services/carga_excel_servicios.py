@@ -245,9 +245,28 @@ class CargaExcelFuncionalServicios:
         # Determinar mes
         if not mes and fecha_servicio:
             mes = fecha_servicio.strftime('%B')
-        
-        # Generar código
-        codigo = f"HIST-{fecha_servicio.strftime('%Y%m') if fecha_servicio else 'NODATE'}-{fila_num:04d}"
+
+        if not hasattr(self, '_ultimo_correlativo_cache'):
+            ultimo_registro = self.servicios_col.find_one(
+                {"codigo_servicio_principal": {"$regex": "^HIST-"}},
+                sort=[("codigo_servicio_principal", -1)]
+            )
+            if ultimo_registro:
+                try:
+                    codigo_str = ultimo_registro.get("codigo_servicio_principal", "")
+                    # Extrae el número final después del último guion
+                    self._ultimo_correlativo_cache = int(codigo_str.split('-')[-1])
+                except (ValueError, IndexError):
+                    self._ultimo_correlativo_cache = 0
+            else:
+                self._ultimo_correlativo_cache = 0
+
+        # Sumamos el correlativo de la DB + el número de fila actual del Excel
+        correlativo_actual = self._ultimo_correlativo_cache + fila_num
+
+        # Generar código correlativo
+        fecha_cod = fecha_servicio.strftime('%Y%m') if fecha_servicio else 'NODATE'
+        codigo = f"HIST-{fecha_cod}-{correlativo_actual:04d}"
         
         # Construir servicio
         servicio = {
