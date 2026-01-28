@@ -130,7 +130,7 @@ class ServicioPrincipalService:
     ) -> Dict[str, Any]:
         try:
             query = {
-                "estado": {"$in": ["Programado", "Reprogramado"]}
+                # "estado": {"$in": ["Programado", "Reprogramado"]}
             }
             
             if filter_params:
