@@ -430,3 +430,22 @@ def obtener_kpis_completos(
     except Exception as e:
         logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+
+@router.get("/fletes_indicador")
+def obtener_kpis_completos(
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+
+):
+
+    try:
+        resultado = gerencia_service.get_resumen_fletes_completo()
+
+        
+        return resultado
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor")

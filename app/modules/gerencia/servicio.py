@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta , time
 from typing import Dict, Any, Optional, List
 from pymongo.collection import Collection
 from math import ceil
+from decimal import Decimal, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,9 @@ class GerenciaService:
             if total_vendido == 0 and "total_general" in total_vendido_result:
                 total_vendido = total_vendido_result.get("total_general", 0)
 
+
+            valor = Decimal(str(total_vendido)) * Decimal("1.18")
+            total_vendido_bruto = valor.quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
             # 3. Pipeline para KPIs financieros de facturacion_gestion
             pipeline = [
                 {"$match": query},
@@ -424,6 +428,7 @@ class GerenciaService:
                 "summary": {
                     # Total Vendido (calculado por separado)
                     "total_vendido": float(total_vendido),
+                    "total_vendido_bruto":total_vendido_bruto,
                     "cantidad_fletes_vendidos": total_vendido_result.get("cantidad_fletes", 0),
                     
                     # KPIs financieros (de facturacion_gestion)
@@ -1152,4 +1157,50 @@ class GerenciaService:
 
         except Exception as e:
             logger.error(f"Error en analytics: {str(e)}")
+            raise
+
+    
+    def get_resumen_fletes_completo(self):
+        try:
+            pipeline = [
+                {
+                    "$facet": {
+                        # Rama para contar por cada estado existente
+                        "conteo_por_estado": [
+                            {
+                                "$group": {
+                                    "_id": "$estado_flete",
+                                    "cantidad": {"$sum": 1}
+                                }
+                            }
+                        ],
+                        # Rama para el gran total de la colección
+                        "total_general": [
+                            {"$count": "total"}
+                        ]
+                    }
+                }
+            ]
+
+            resultado = list(self.fletes_collection.aggregate(pipeline))
+            
+            if resultado:
+                data = resultado[0]
+                # Transformamos la lista de estados en un diccionario { "ESTADO": cantidad }
+                resumen_estados = {
+                    (item["_id"] if item["_id"] else "SIN_ESTADO"): item["cantidad"] 
+                    for item in data.get("conteo_por_estado", [])
+                }
+                
+                total_fletes = data["total_general"][0]["total"] if data["total_general"] else 0
+
+                return {
+                    "total_fletes": total_fletes,
+                    "resumen_estados": resumen_estados
+                }
+                
+            return {"total_fletes": 0, "resumen_estados": {}}
+
+        except Exception as e:
+            logger.error(f"Error al obtener resumen de fletes: {str(e)}")
             raise
