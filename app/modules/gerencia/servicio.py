@@ -901,4 +901,255 @@ class GerenciaService:
         except Exception as e:
             logger.error(f"Error al obtener resumen por proveedor: {str(e)}", exc_info=True)
             raise
+    def get_resumen_por_cliente(
+        self,
+        nombre_cliente: Optional[str] = None,
+        fecha_inicio: Optional[datetime] = None,
+        fecha_fin: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """
+        Obtiene resumen de servicios agrupados por cliente.
+        Filtra por cliente (opcional) y rango de fechas (opcional).
         
+        Retorna:
+        - CLIENTE | TOTAL DE SERVICIOS | TOTAL VENDIDO
+        """
+        try:
+            pipeline = []
+            
+            # 1. Match inicial en la colección de fletes (solo valorizados con monto)
+            match_fletes = {
+                "estado_flete": "VALORIZADO",
+                "monto_flete": {"$gt": 0}
+            }
+            pipeline.append({"$match": match_fletes})
+            
+            # 2. Lookup para obtener información del servicio principal
+            pipeline.append({
+                "$lookup": {
+                    "from": "servicio_principal",
+                    "let": {"servicio_id_str": "$servicio_id"},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$eq": [
+                                        {"$toString": "$_id"},
+                                        "$$servicio_id_str"
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    "as": "info_servicio"
+                }
+            })
+            
+            # 3. Desempaquetar el servicio
+            pipeline.append({
+                "$unwind": {
+                    "path": "$info_servicio",
+                    "preserveNullAndEmptyArrays": False
+                }
+            })
+            
+            # 4. Construir filtros dinámicos basados en la info del cliente
+            match_filters = {}
+            
+            if nombre_cliente:
+                # Filtro por cliente dentro de info_servicio
+                match_filters["info_servicio.cliente.nombre"] = {
+                    "$regex": f"^{nombre_cliente}$",
+                    "$options": "i"
+                }
+            
+            if fecha_inicio or fecha_fin:
+                date_filter = {}
+                if fecha_inicio: date_filter["$gte"] = fecha_inicio
+                if fecha_fin: date_filter["$lte"] = fecha_fin
+                match_filters["info_servicio.fecha_servicio"] = date_filter
+            
+            if match_filters:
+                pipeline.append({"$match": match_filters})
+            
+            # 5. Agrupar por Cliente
+            pipeline.append({
+                "$group": {
+                    "_id": "$info_servicio.cliente.nombre",
+                    "total_servicios": {"$sum": 1},
+                    "total_vendido": {"$sum": {"$toDouble": "$monto_flete"}},
+                    "codigos_servicio": {"$addToSet": "$info_servicio.codigo_servicio_principal"},
+                    "codigos_flete": {"$addToSet": "$codigo_flete"},
+                    # Datos del cliente (tomando el primero encontrado para ese nombre)
+                    "razon_social": {"$first": "$info_servicio.cliente.razon_social"},
+                    "ruc": {"$first": "$info_servicio.cliente.ruc"}
+                }
+            })
+            
+            # 6. Ordenar por el que más compró (Total Vendido descendente)
+            pipeline.append({
+                "$sort": {"total_vendido": -1}
+            })
+            
+            # 7. Proyectar formato final
+            pipeline.append({
+                "$project": {
+                    "_id": 0,
+                    "cliente": "$_id",
+                    "razon_social": 1,
+                    "ruc": 1,
+                    "total_servicios": 1,
+                    "total_vendido": 1,
+                    "codigos_servicio": 1,
+                    "codigos_flete": 1
+                }
+            })
+            
+            # 8. Ejecutar y Procesar Totales
+            resultados = list(self.fletes_collection.aggregate(pipeline))
+            
+            total_general_servicios = sum(r["total_servicios"] for r in resultados)
+            total_general_vendido = sum(r["total_vendido"] for r in resultados)
+            
+            return {
+                "resumen_general": {
+                    "cantidad_clientes": len(resultados),
+                    "total_servicios": total_general_servicios,
+                    "total_vendido_acumulado": float(total_general_vendido)
+                },
+                "detalle_por_cliente": [
+                    {
+                        "cliente": r["cliente"],
+                        "razon_social": r.get("razon_social", ""),
+                        "ruc": r.get("ruc", ""),
+                        "total_servicios": r["total_servicios"],
+                        "total_vendido": float(r["total_vendido"]),
+                        "ticket_promedio": float(r["total_vendido"] / r["total_servicios"]) if r["total_servicios"] > 0 else 0
+                    }
+                    for r in resultados
+                ]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
+            raise
+        
+    def get_analytics_kpis(
+        self,
+        nombre_cliente: Optional[str] = None,
+        fecha_inicio: Optional[datetime] = None,
+        fecha_fin: Optional[datetime] = None,
+        limit_tops: int = 5
+    ) -> dict:
+        try:
+            hoy = datetime.combine(datetime.now().date(), time.min)
+            
+            # 1. Filtro base
+            query = {}
+            if nombre_cliente:
+                query["datos_completos.fletes.servicio.nombre_cliente"] = {
+                    "$regex": f"^{nombre_cliente}$", "$options": "i"
+                }
+            
+            if fecha_inicio or fecha_fin:
+                date_filter = {}
+                if fecha_inicio: date_filter["$gte"] = fecha_inicio
+                if fecha_fin: date_filter["$lte"] = fecha_fin
+                query["datos_completos.fecha_emision"] = date_filter
+
+            # 2. Pipeline con Facetas corregido
+            pipeline = [
+                {"$match": query},
+                {
+                    "$facet": {
+                        # Totales generales de la factura
+                        "summary": [
+                            {
+                                "$group": {
+                                    "_id": None,
+                                    "total_facturado": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                                    "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                                    "total_pendiente": {
+                                        "$sum": {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]}
+                                    }
+                                }
+                            }
+                        ],
+                        # TOP PLACAS (Usando placa_flota y monto_flete)
+                        "top_placas": [
+                            {"$unwind": "$datos_completos.fletes"},
+                            {
+                                "$group": {
+                                    "_id": "$datos_completos.fletes.servicio.placa_flota",
+                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
+                                    "cantidad_viajes": {"$sum": 1}
+                                }
+                            },
+                            {"$sort": {"monto_generado": -1}},
+                            {"$limit": limit_tops}
+                        ],
+                        # TOP CONDUCTORES
+                        "top_conductores": [
+                            {"$unwind": "$datos_completos.fletes"},
+                            {
+                                "$group": {
+                                    "_id": "$datos_completos.fletes.servicio.nombre_conductor",
+                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
+                                    "servicios": {"$sum": 1}
+                                }
+                            },
+                            {"$sort": {"monto_generado": -1}},
+                            {"$limit": limit_tops}
+                        ],
+                        # TOP PROVEEDORES
+                        "top_proveedores": [
+                            {"$unwind": "$datos_completos.fletes"},
+                            {
+                                "$group": {
+                                    "_id": "$datos_completos.fletes.servicio.nombre_proveedor",
+                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
+                                    "fletes_count": {"$sum": 1}
+                                }
+                            },
+                            {"$sort": {"monto_generado": -1}},
+                            {"$limit": limit_tops}
+                        ],
+                        # TOP CLIENTES (Aquí si usamos monto_total de la factura o el del flete)
+                        "top_clientes": [
+                            {"$unwind": "$datos_completos.fletes"},
+                            {
+                                "$group": {
+                                    "_id": "$datos_completos.fletes.servicio.nombre_cliente",
+                                    "monto_facturado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
+                                    "conteo": {"$sum": 1}
+                                }
+                            },
+                            {"$sort": {"monto_facturado": -1}},
+                            {"$limit": limit_tops}
+                        ]
+                    }
+                }
+            ]
+
+            result = list(self.collection.aggregate(pipeline))[0]
+            
+            # Formatear la salida
+            summary = result["summary"][0] if result["summary"] else {}
+            
+            return {
+                "summary": {
+                    "total_facturado": float(summary.get("total_facturado", 0)),
+                    "total_pagado": float(summary.get("total_pagado", 0)),
+                    "total_pendiente": float(summary.get("total_pendiente", 0)),
+                },
+                "rankings": {
+                    "clientes": result.get("top_clientes", []),
+                    "proveedores": result.get("top_proveedores", []),
+                    "placas": result.get("top_placas", []),
+                    "conductores": result.get("top_conductores", [])
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en analytics: {str(e)}")
+            raise
