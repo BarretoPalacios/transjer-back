@@ -5,18 +5,18 @@ from datetime import datetime, date
 # Schema base
 class FlotaBase(BaseModel):
     codigo_flota: Optional[str] = Field(..., min_length=1, max_length=20, description="Código único de la flota")
-    placa: str = Field(..., min_length=6, max_length=10, description="Placa del vehículo")
-    marca: str = Field(..., min_length=2, max_length=50, description="Marca del vehículo")
-    modelo: str = Field(..., min_length=1, max_length=50, description="Modelo del vehículo")
-    anio: int = Field(..., ge=1990, le=2050, description="Año de fabricación")
+    placa: str = Field(..., description="Placa del vehículo")
+    marca: Optional[str]  = Field(None,  description="Marca del vehículo")
+    modelo: Optional[str]  = Field(None, description="Modelo del vehículo")
+    anio: int = Field(...,  description="Año de fabricación")
     tn: float = Field(..., ge=0, description="Capacidad de carga en toneladas")
     m3: float = Field(..., ge=0, description="Capacidad volumétrica en metros cúbicos")
     tipo_vehiculo: str = Field(..., description="Volquete, Furgón, Plataforma, Tanque, Cisterna, etc.")
     tipo_combustible: Optional[str] = Field(default="Diesel", description="Diesel, Gasolina, GNV, Eléctrico")
     
     # Datos del conductor
-    nombre_conductor: Optional[str] = Field(None, min_length=2, max_length=100, description="Nombre completo del conductor")
-    numero_licencia: Optional[str] = Field(None, min_length=5, max_length=20, description="Número de licencia de conducir")
+    nombre_conductor: Optional[str] = Field(None,  description="Nombre completo del conductor")
+    numero_licencia: Optional[str] = Field(None,  description="Número de licencia de conducir")
     
     revision_tecnica_emision: Optional[date] = Field(None, description="Fecha de emisión de la revisión técnica")
     revision_tecnica_vencimiento: Optional[date] = Field(None, description="Fecha de vencimiento de la revisión técnica")
@@ -34,18 +34,18 @@ class FlotaBase(BaseModel):
 # Schema para creación (sin id que se genera automáticamente)
 class FlotaCreate(BaseModel):
     codigo_flota: Optional[str] = Field(None, min_length=1, max_length=20, description="Código único de la flota")
-    placa: str = Field(..., min_length=6, max_length=10, description="Placa del vehículo")
-    marca: str = Field(..., min_length=2, max_length=50, description="Marca del vehículo")
-    modelo: str = Field(..., min_length=1, max_length=50, description="Modelo del vehículo")
-    anio: int = Field(..., ge=1990, le=2050, description="Año de fabricación")
+    placa: str = Field(..., description="Placa del vehículo")
+    marca: Optional[str]  = Field(None,  description="Marca del vehículo")
+    modelo: Optional[str]  = Field(None,  description="Modelo del vehículo")
+    anio: int = Field(...,  description="Año de fabricación")
     tn: float = Field(..., ge=0, description="Capacidad de carga en toneladas")
     m3: float = Field(..., ge=0, description="Capacidad volumétrica en metros cúbicos")
     tipo_vehiculo: str = Field(..., description="Volquete, Furgón, Plataforma, Tanque, Cisterna, etc.")
     tipo_combustible: Optional[str] = Field(default="Diesel", description="Diesel, Gasolina, GNV, Eléctrico")
     
     # Datos del conductor
-    nombre_conductor: Optional[str] = Field(None, min_length=2, max_length=100, description="Nombre completo del conductor")
-    numero_licencia: Optional[str] = Field(None, min_length=5, max_length=20, description="Número de licencia de conducir")
+    nombre_conductor: Optional[str] = Field(None, description="Nombre completo del conductor")
+    numero_licencia: Optional[str] = Field(None, description="Número de licencia de conducir")
     
     revision_tecnica_emision: Optional[date] = None
     revision_tecnica_vencimiento: Optional[date] = None
@@ -62,18 +62,18 @@ class FlotaCreate(BaseModel):
 
 # Schema para actualización (todo opcional)
 class FlotaUpdate(BaseModel):
-    placa: Optional[str] = Field(None, min_length=6, max_length=10)
-    marca: Optional[str] = Field(None, min_length=2, max_length=50)
-    modelo: Optional[str] = Field(None, min_length=1, max_length=50)
-    anio: Optional[int] = Field(None, ge=1990, le=2050)
+    placa: Optional[str] = Field(None)
+    marca: Optional[str] = Field(None)
+    modelo: Optional[str] = Field(None)
+    anio: Optional[int] = Field(None)
     tn: Optional[float] = Field(None, ge=0)
     m3: Optional[float] = Field(None, ge=0)
     tipo_vehiculo: Optional[str] = None
     tipo_combustible: Optional[str] = None
     
     # Datos del conductor
-    nombre_conductor: Optional[str] = Field(None, min_length=2, max_length=100)
-    numero_licencia: Optional[str] = Field(None, min_length=5, max_length=20)
+    nombre_conductor: Optional[str] = Field(None)
+    numero_licencia: Optional[str] = Field(None)
     
     revision_tecnica_emision: Optional[date] = None
     revision_tecnica_vencimiento: Optional[date] = None

@@ -4,18 +4,18 @@ from pydantic import BaseModel, Field, field_serializer
 
 class Flota(BaseModel):
     codigo_flota: Optional[str]  = Field(..., min_length=1, max_length=20, description="Código único de la flota")
-    placa: str = Field(..., min_length=6, max_length=10, description="Placa del vehículo")
-    marca: str = Field(..., min_length=2, max_length=50, description="Marca del vehículo")
-    modelo: str = Field(..., min_length=1, max_length=50, description="Modelo del vehículo")
-    anio: int = Field(..., ge=1990, le=2050, description="Año de fabricación")
+    placa: str = Field(..., description="Placa del vehículo")
+    marca: Optional[str]  = Field(None,  description="Marca del vehículo")
+    modelo: Optional[str]  = Field(None,  description="Modelo del vehículo")
+    anio: int = Field(..., description="Año de fabricación")
     tn: float = Field(..., ge=0, description="Capacidad de carga en toneladas")
     m3: float = Field(..., ge=0, description="Capacidad volumétrica en metros cúbicos")
     tipo_vehiculo: str = Field(..., description="Volquete, Furgón, Plataforma, Tanque, Cisterna, etc.")
     tipo_combustible: Optional[str] = Field(default="Diesel", description="Diesel, Gasolina, GNV, Eléctrico")
     
     # Datos del conductor
-    nombre_conductor: Optional[str] = Field(None, min_length=2, max_length=100, description="Nombre completo del conductor")
-    numero_licencia: Optional[str] = Field(None, min_length=5, max_length=20, description="Número de licencia de conducir")
+    nombre_conductor: Optional[str] = Field(None,  description="Nombre completo del conductor")
+    numero_licencia: Optional[str] = Field(None,  description="Número de licencia de conducir")
     
     revision_tecnica_emision: Optional[date] = Field(None, description="Fecha de emisión de la revisión técnica")
     revision_tecnica_vencimiento: Optional[date] = Field(None, description="Fecha de vencimiento de la revisión técnica")
