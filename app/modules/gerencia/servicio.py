@@ -1304,7 +1304,9 @@ class GerenciaService:
             
             # Pendiente por Cobrar = Facturación Bruta - Detracciones (Monto neto a recibir en cuenta)
             # Nota: Si prefieres que sea lo que falta cobrar realmente: (Fact. Bruta - Detracciones) - Cobrado
-            pendiente_por_cobrar = facturacion_bruta - detracciones - cobrado
+            # pendiente_por_cobrar = facturacion_bruta - detracciones - cobrado
+            pendiente_por_cobrar = facturacion_bruta - detracciones 
+
 
             return {
                 "total_vendido_neto": float(total_vendido_neto),
