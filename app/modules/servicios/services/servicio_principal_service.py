@@ -686,6 +686,17 @@ class ServicioPrincipalService:
         try:
             result = self.get_all_servicios(filter_params, page=1, page_size=10000)
             servicios_list = result["data"]
+
+            def obtener_nombre_persona(persona_dict):
+                if not isinstance(persona_dict, dict):
+                    return ""
+                # Busca en orden de prioridad
+                return (
+                    persona_dict.get("nombres_completos") or 
+                    persona_dict.get("nombres") or 
+                    persona_dict.get("nombre") or 
+                    ""
+                )
             
             if not servicios_list:
                 df = pd.DataFrame(columns=[
@@ -718,11 +729,12 @@ class ServicioPrincipalService:
                         "Cuenta": servicio.get("cuenta", {}).get("nombre", ""),
                         "Flota": servicio.get("flota", {}).get("placa", "") if servicio.get("flota") else "",
                         "Conductores": ", ".join(
-                            c.get("nombres_completos", "") for c in conductores if isinstance(c, dict)
-                        ),
+                            obtener_nombre_persona(c) for c in conductores
+                        ).strip(", "),
+                        
                         "Auxiliares": ", ".join(
-                            a.get("nombres_completos", "") for a in auxiliares if isinstance(a, dict)
-                        ),
+                            obtener_nombre_persona(a) for a in auxiliares
+                        ).strip(", "),
                         "M3": servicio.get("m3", ""),
                         "TN": servicio.get("tn", ""),
                         "GIA RR": servicio.get("gia_rr", ""),
