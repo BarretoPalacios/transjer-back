@@ -73,16 +73,6 @@ class FlotaService:
                     f"La placa {flota_data['placa']} ya está registrada"
                 )
 
-            # 2️⃣ Si viene número de licencia, verificar que no exista duplicado
-            if flota_data.get("numero_licencia"):
-                existing_licencia = self.collection.find_one({
-                    "numero_licencia": flota_data["numero_licencia"]
-                })
-                if existing_licencia:
-                    raise ValueError(
-                        f"El número de licencia {flota_data['numero_licencia']} ya está registrado"
-                    )
-
             # 3️⃣ Generar código automáticamente
             codigo_flota = generate_sequential_code(
                 counters_collection=self.db["counters"],
