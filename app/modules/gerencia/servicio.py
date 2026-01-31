@@ -906,6 +906,7 @@ class GerenciaService:
         except Exception as e:
             logger.error(f"Error al obtener resumen por proveedor: {str(e)}", exc_info=True)
             raise
+
     def get_resumen_por_cliente(
         self,
         nombre_cliente: Optional[str] = None,
@@ -1037,137 +1038,138 @@ class GerenciaService:
             
         except Exception as e:
             logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
-            raise
+            raise 
+
+#     def get_kpis_financieros_especificos(
+#         self,
+#         nombre_cliente: Optional[str] = None,
+#         fecha_inicio: Optional[datetime] = None,
+#         fecha_fin: Optional[datetime] = None
+#     ) -> dict:
+#         """
+#         Obtiene KPIs específicos: Vendido Neto/Bruto, Facturación Bruta, 
+#         Pendientes, Detracciones y Cobrados.
+#         """
+#         try:
+#             hoy = datetime.combine(datetime.now().date(), time.min)
+            
+#             # 1. Filtros de búsqueda
+#             query = {}
+#             if nombre_cliente:
+#                 query["datos_completos.fletes.servicio.nombre_cliente"] = {
+#                     "$regex": f"^{nombre_cliente}$", "$options": "i"
+#                 }
+#             if fecha_inicio or fecha_fin:
+#                 query["datos_completos.fecha_emision"] = {}
+#                 if fecha_inicio: query["datos_completos.fecha_emision"]["$gte"] = fecha_inicio
+#                 if fecha_fin: query["datos_completos.fecha_emision"]["$lte"] = fecha_fin
+
+#             # 2. Obtener Total Vendido Neto (Suma de fletes)
+#             # Reutilizamos tu lógica de valorización para el Neto
+#             res_valorizado = self.get_total_valorizado(nombre_cliente, fecha_inicio, fecha_fin)
+#             total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
+            
+#             # CÁLCULO: Vendido Bruto (Neto + 18%)
+#             total_vendido_bruto = (total_vendido_neto * Decimal("1.18")).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+
+#             # 3. Pipeline para Facturación (Basado en comprobantes emitidos)
+#             pipeline = [
+#                 {"$match": query},
+# {
+#     "$group": {
+#         "_id": None,
+#         "facturacion_bruta": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+#         "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
+#         "total_cobrado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
         
-    def get_analytics_kpis(
-        self,
-        nombre_cliente: Optional[str] = None,
-        fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None,
-        limit_tops: int = 5
-    ) -> dict:
-        try:
-            hoy = datetime.combine(datetime.now().date(), time.min)
-            
-            # 1. Filtro base
-            query = {}
-            if nombre_cliente:
-                query["datos_completos.fletes.servicio.nombre_cliente"] = {
-                    "$regex": f"^{nombre_cliente}$", "$options": "i"
-                }
-            
-            if fecha_inicio or fecha_fin:
-                date_filter = {}
-                if fecha_inicio: date_filter["$gte"] = fecha_inicio
-                if fecha_fin: date_filter["$lte"] = fecha_fin
-                query["datos_completos.fecha_emision"] = date_filter
+#         "total_vencido": {
+#             "$sum": {
+#                 "$cond": [
+#                     {
+#                         "$and": [
+#                             {"$lt": ["$datos_completos.fecha_vencimiento", hoy]},
+#                             {"$ne": ["$estado_pago_neto", "Pagado"]},
+#                             {"$ne": ["$estado_pago_neto", "Anulado"]}
+#                         ]
+#                     },
+#                     {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
+#                     0
+#                 ]
+#             }
+#         },
+#         "total_por_vencer": {
+#             "$sum": {
+#                 "$cond": [
+#                     {
+#                         "$and": [
+#                             {"$gte": ["$datos_completos.fecha_vencimiento", hoy]},
+#                             {"$ne": ["$estado_pago_neto", "Pagado"]},
+#                             {"$ne": ["$estado_pago_neto", "Anulado"]}
+#                         ]
+#                     },
+#                     {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
+#                     0
+#                 ]
+#             }
+#         }
+#     }
+# },
+# {
+#     # REDONDEO EN MONGODB: Evita que salgan números como 70.80000000000001
+#     "$project": {
+#         "facturacion_bruta": {"$round": ["$facturacion_bruta", 2]},
+#         "total_detracciones": {"$round": ["$total_detracciones", 2]},
+#         "total_cobrado": {"$round": ["$total_cobrado", 2]},
+#         "total_vencido": {"$round": ["$total_vencido", 2]},
+#         "total_por_vencer": {"$round": ["$total_por_vencer", 2]}
+#     }
+# }
+#             ]
 
-            # 2. Pipeline con Facetas corregido
-            pipeline = [
-                {"$match": query},
-                {
-                    "$facet": {
-                        # Totales generales de la factura
-                        "summary": [
-                            {
-                                "$group": {
-                                    "_id": None,
-                                    "total_facturado": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-                                    "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
-                                    "total_pendiente": {
-                                        "$sum": {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]}
-                                    }
-                                }
-                            }
-                        ],
-                        # TOP PLACAS (Usando placa_flota y monto_flete)
-                        "top_placas": [
-                            {"$unwind": "$datos_completos.fletes"},
-                            {
-                                "$group": {
-                                    "_id": "$datos_completos.fletes.servicio.placa_flota",
-                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
-                                    "cantidad_viajes": {"$sum": 1}
-                                }
-                            },
-                            {"$sort": {"monto_generado": -1}},
-                            {"$limit": limit_tops}
-                        ],
-                        # TOP CONDUCTORES
-                        "top_conductores": [
-                            {"$unwind": "$datos_completos.fletes"},
-                            {
-                                "$group": {
-                                    "_id": "$datos_completos.fletes.servicio.nombre_conductor",
-                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
-                                    "servicios": {"$sum": 1}
-                                }
-                            },
-                            {"$sort": {"monto_generado": -1}},
-                            {"$limit": limit_tops}
-                        ],
-                        # TOP PROVEEDORES
-                        "top_proveedores": [
-                            {"$unwind": "$datos_completos.fletes"},
-                            {
-                                "$group": {
-                                    "_id": "$datos_completos.fletes.servicio.nombre_proveedor",
-                                    "monto_generado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
-                                    "fletes_count": {"$sum": 1}
-                                }
-                            },
-                            {"$sort": {"monto_generado": -1}},
-                            {"$limit": limit_tops}
-                        ],
-                        # TOP CLIENTES (Aquí si usamos monto_total de la factura o el del flete)
-                        "top_clientes": [
-                            {"$unwind": "$datos_completos.fletes"},
-                            {
-                                "$group": {
-                                    "_id": "$datos_completos.fletes.servicio.nombre_cliente",
-                                    "monto_facturado": {"$sum": {"$toDouble": "$datos_completos.fletes.monto_flete"}},
-                                    "conteo": {"$sum": 1}
-                                }
-                            },
-                            {"$sort": {"monto_facturado": -1}},
-                            {"$limit": limit_tops}
-                        ]
-                    }
-                }
-            ]
+#             result = list(self.collection.aggregate(pipeline))
+#             data = result[0] if result else {}
 
-            result = list(self.collection.aggregate(pipeline))[0]
-            
-            # Formatear la salida
-            summary = result["summary"][0] if result["summary"] else {}
-            
-            return {
-                "summary": {
-                    "total_facturado": float(summary.get("total_facturado", 0)),
-                    "total_pagado": float(summary.get("total_pagado", 0)),
-                    "total_pendiente": float(summary.get("total_pendiente", 0)),
-                },
-                "rankings": {
-                    "clientes": result.get("top_clientes", []),
-                    "proveedores": result.get("top_proveedores", []),
-                    "placas": result.get("top_placas", []),
-                    "conductores": result.get("top_conductores", [])
-                }
-            }
+#             # 4. Cálculos Finales con Decimal para precisión
+#             facturacion_bruta = Decimal(str(data.get("facturacion_bruta", 0)))
+#             detracciones = Decimal(str(data.get("total_detracciones", 0)))
+#             cobrado = Decimal(str(data.get("total_cobrado", 0)))
 
-        except Exception as e:
-            logger.error(f"Error en analytics: {str(e)}")
-            raise
+#             # Facturación Bruta Pendiente = Vendido Bruto - Facturacion Bruta
+#             facturacion_bruta_pendiente = total_vendido_bruto - facturacion_bruta
+            
+#             # Pendiente por Cobrar = Facturación Bruta - Detracciones (Monto neto a recibir en cuenta)
+#             # Nota: Si prefieres que sea lo que falta cobrar realmente: (Fact. Bruta - Detracciones) - Cobrado
+#             # pendiente_por_cobrar = facturacion_bruta - detracciones - cobrado
+#             pendiente_por_cobrar = facturacion_bruta - detracciones 
+
+
+#             return {
+#                 "total_vendido_neto": float(total_vendido_neto),
+#                 "total_vendido_bruto": float(total_vendido_bruto),
+#                 "facturacion_bruta": float(facturacion_bruta),
+#                 "facturacion_bruta_pendiente": float(facturacion_bruta_pendiente),
+#                 "total_detracciones": float(detracciones),
+#                 "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar)),
+#                 "total_cobrado": float(cobrado),
+#                 "total_por_vencer": float(data.get("total_por_vencer", 0)),
+#                 "total_vencido": float(data.get("total_vencido", 0)),
+#                 "fletes":self.get_resumen_fletes_completo()
+#             }
+
+#         except Exception as e:
+#             logger.error(f"Error en KPIs: {str(e)}")
+#             raise
+
 
     def get_kpis_financieros_especificos(
-        self,
-        nombre_cliente: Optional[str] = None,
-        fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None
-    ) -> dict:
+            self,
+            nombre_cliente: Optional[str] = None,
+            fecha_inicio: Optional[datetime] = None,
+            fecha_fin: Optional[datetime] = None
+        ) -> dict:
         """
         Obtiene KPIs específicos: Vendido Neto/Bruto, Facturación Bruta, 
-        Pendientes, Detracciones y Cobrados.
+        Pendientes, Detracciones y Cobrados, incluyendo conteos de documentos.
         """
         try:
             hoy = datetime.combine(datetime.now().date(), time.min)
@@ -1183,102 +1185,135 @@ class GerenciaService:
                 if fecha_inicio: query["datos_completos.fecha_emision"]["$gte"] = fecha_inicio
                 if fecha_fin: query["datos_completos.fecha_emision"]["$lte"] = fecha_fin
 
-            # 2. Obtener Total Vendido Neto (Suma de fletes)
-            # Reutilizamos tu lógica de valorización para el Neto
+            # 2. Obtener Total Vendido Neto y Conteo de Fletes
             res_valorizado = self.get_total_valorizado(nombre_cliente, fecha_inicio, fecha_fin)
             total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
+            # cantidad_fletes = res_valorizado.get("cantidad_fletes", 0) # Asumiendo que tu función ya devuelve este conteo
             
             # CÁLCULO: Vendido Bruto (Neto + 18%)
             total_vendido_bruto = (total_vendido_neto * Decimal("1.18")).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
 
-            # 3. Pipeline para Facturación (Basado en comprobantes emitidos)
+            # 3. Pipeline para Facturación y Conteos
             pipeline = [
                 {"$match": query},
-{
-    "$group": {
-        "_id": None,
-        "facturacion_bruta": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-        "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
-        "total_cobrado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
-        
-        "total_vencido": {
-            "$sum": {
-                "$cond": [
-                    {
-                        "$and": [
-                            {"$lt": ["$datos_completos.fecha_vencimiento", hoy]},
-                            {"$ne": ["$estado_pago_neto", "Pagado"]},
-                            {"$ne": ["$estado_pago_neto", "Anulado"]}
-                        ]
-                    },
-                    {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
-                    0
-                ]
-            }
-        },
-        "total_por_vencer": {
-            "$sum": {
-                "$cond": [
-                    {
-                        "$and": [
-                            {"$gte": ["$datos_completos.fecha_vencimiento", hoy]},
-                            {"$ne": ["$estado_pago_neto", "Pagado"]},
-                            {"$ne": ["$estado_pago_neto", "Anulado"]}
-                        ]
-                    },
-                    {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
-                    0
-                ]
-            }
-        }
-    }
-},
-{
-    # REDONDEO EN MONGODB: Evita que salgan números como 70.80000000000001
-    "$project": {
-        "facturacion_bruta": {"$round": ["$facturacion_bruta", 2]},
-        "total_detracciones": {"$round": ["$total_detracciones", 2]},
-        "total_cobrado": {"$round": ["$total_cobrado", 2]},
-        "total_vencido": {"$round": ["$total_vencido", 2]},
-        "total_por_vencer": {"$round": ["$total_por_vencer", 2]}
-    }
-}
+                {
+                    "$group": {
+                        "_id": None,
+                        # Sumas monetarias
+                        "facturacion_bruta": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                        "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
+                        "total_cobrado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
+                        
+                        # Conteos (Counts)
+                        "cnt_facturas_bruta": {"$sum": 1},
+                        "cnt_detracciones": {
+                            "$sum": {"$cond": [{"$gt": [{"$toDouble": "$monto_detraccion"}, 0]}, 1, 0]}
+                        },
+                        "cnt_cobrado": {
+                            "$sum": {"$cond": [{"$gt": [{"$toDouble": "$monto_pagado_acumulado"}, 0]}, 1, 0]}
+                        },
+
+                        "total_vencido": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$lt": ["$datos_completos.fecha_vencimiento", hoy]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]},
+                                            {"$ne": ["$estado_pago_neto", "Anulado"]}
+                                        ]
+                                    },
+                                    {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
+                                    0
+                                ]
+                            }
+                        },
+                        "cnt_vencido": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$lt": ["$datos_completos.fecha_vencimiento", hoy]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]},
+                                            {"$ne": ["$estado_pago_neto", "Anulado"]}
+                                        ]
+                                    },
+                                    1, 0
+                                ]
+                            }
+                        },
+                        "total_por_vencer": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$gte": ["$datos_completos.fecha_vencimiento", hoy]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]},
+                                            {"$ne": ["$estado_pago_neto", "Anulado"]}
+                                        ]
+                                    },
+                                    {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
+                                    0
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "$project": {
+                        "facturacion_bruta": {"$round": ["$facturacion_bruta", 2]},
+                        "total_detracciones": {"$round": ["$total_detracciones", 2]},
+                        "total_cobrado": {"$round": ["$total_cobrado", 2]},
+                        "total_vencido": {"$round": ["$total_vencido", 2]},
+                        "total_por_vencer": {"$round": ["$total_por_vencer", 2]},
+                        "cnt_facturas_bruta": 1,
+                        "cnt_detracciones": 1,
+                        "cnt_cobrado": 1,
+                        "cnt_vencido": 1
+                    }
+                }
             ]
 
             result = list(self.collection.aggregate(pipeline))
             data = result[0] if result else {}
 
-            # 4. Cálculos Finales con Decimal para precisión
+            # 4. Cálculos Finales
             facturacion_bruta = Decimal(str(data.get("facturacion_bruta", 0)))
             detracciones = Decimal(str(data.get("total_detracciones", 0)))
             cobrado = Decimal(str(data.get("total_cobrado", 0)))
-
-            # Facturación Bruta Pendiente = Vendido Bruto - Facturacion Bruta
             facturacion_bruta_pendiente = total_vendido_bruto - facturacion_bruta
-            
-            # Pendiente por Cobrar = Facturación Bruta - Detracciones (Monto neto a recibir en cuenta)
-            # Nota: Si prefieres que sea lo que falta cobrar realmente: (Fact. Bruta - Detracciones) - Cobrado
-            # pendiente_por_cobrar = facturacion_bruta - detracciones - cobrado
             pendiente_por_cobrar = facturacion_bruta - detracciones 
-
 
             return {
                 "total_vendido_neto": float(total_vendido_neto),
+                # "cantidad_fletes": cantidad_fletes, # Conteo de fletes del Neto
+                
                 "total_vendido_bruto": float(total_vendido_bruto),
+                
                 "facturacion_bruta": float(facturacion_bruta),
+                "cnt_facturas_bruta": data.get("cnt_facturas_bruta", 0), # Conteo facturas
+                
                 "facturacion_bruta_pendiente": float(facturacion_bruta_pendiente),
+                
                 "total_detracciones": float(detracciones),
+                "cnt_detracciones": data.get("cnt_detracciones", 0), # Conteo facturas con detracción
+                
                 "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar)),
+                
                 "total_cobrado": float(cobrado),
+                "cnt_cobrado": data.get("cnt_cobrado", 0), # Conteo facturas cobradas
+                
                 "total_por_vencer": float(data.get("total_por_vencer", 0)),
+                
                 "total_vencido": float(data.get("total_vencido", 0)),
-                "fletes":self.get_resumen_fletes_completo()
+                "cnt_vencido": data.get("cnt_vencido", 0), # Conteo facturas vencidas
+                
+                "fletes": self.get_resumen_fletes_completo()
             }
 
         except Exception as e:
             logger.error(f"Error en KPIs: {str(e)}")
             raise
-
 
     def get_resumen_fletes_completo(self):
         try:
