@@ -1159,52 +1159,6 @@ class GerenciaService:
             logger.error(f"Error en analytics: {str(e)}")
             raise
 
-    
-    def get_resumen_fletes_completo(self):
-        try:
-            pipeline = [
-                {
-                    "$facet": {
-                        # Rama para contar por cada estado existente
-                        "conteo_por_estado": [
-                            {
-                                "$group": {
-                                    "_id": "$estado_flete",
-                                    "cantidad": {"$sum": 1}
-                                }
-                            }
-                        ],
-                        # Rama para el gran total de la colección
-                        "total_general": [
-                            {"$count": "total"}
-                        ]
-                    }
-                }
-            ]
-
-            resultado = list(self.fletes_collection.aggregate(pipeline))
-            
-            if resultado:
-                data = resultado[0]
-                # Transformamos la lista de estados en un diccionario { "ESTADO": cantidad }
-                resumen_estados = {
-                    (item["_id"] if item["_id"] else "SIN_ESTADO"): item["cantidad"] 
-                    for item in data.get("conteo_por_estado", [])
-                }
-                
-                total_fletes = data["total_general"][0]["total"] if data["total_general"] else 0
-
-                return {
-                    "total_fletes": total_fletes,
-                    "resumen_estados": resumen_estados
-                }
-                
-            return {"total_fletes": 0, "resumen_estados": {}}
-
-        except Exception as e:
-            logger.error(f"Error al obtener resumen de fletes: {str(e)}")
-            raise
-
     def get_kpis_financieros_especificos(
         self,
         nombre_cliente: Optional[str] = None,
@@ -1317,9 +1271,85 @@ class GerenciaService:
                 "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar)),
                 "total_cobrado": float(cobrado),
                 "total_por_vencer": float(data.get("total_por_vencer", 0)),
-                "total_vencido": float(data.get("total_vencido", 0))
+                "total_vencido": float(data.get("total_vencido", 0)),
+                "fletes":self.get_resumen_fletes_completo()
             }
 
         except Exception as e:
             logger.error(f"Error en KPIs: {str(e)}")
+            raise
+
+
+    def get_resumen_fletes_completo(self):
+        try:
+            pipeline = [
+                {
+                    "$facet": {
+                        # 1. Conteo total por cada estado que exista en la DB
+                        "conteo_por_estado": [
+                            {
+                                "$group": {
+                                    "_id": "$estado_flete",
+                                    "cantidad": {"$sum": 1}
+                                }
+                            }
+                        ],
+                        # 2. Específicos: Pendientes (monto 0 o estado PENDIENTE)
+                        "pendientes": [
+                            {"$match": {"estado_flete": "PENDIENTE"}},
+                            {"$count": "total"}
+                        ],
+                        # 3. Valorizados (con monto > 0 pero SIN factura)
+                        "valorizados_sin_factura": [
+                            {
+                                "$match": {
+                                    "estado_flete": "VALORIZADO",
+                                    "pertenece_a_factura": False
+                                }
+                            },
+                            {"$count": "total"}
+                        ],
+                        # 4. Valorizados CON Factura
+                        "valorizados_con_factura": [
+                            {
+                                "$match": {
+                                    "pertenece_a_factura": True
+                                }
+                            },
+                            {"$count": "total"}
+                        ],
+                        # 5. Gran total
+                        "total_general": [
+                            {"$count": "total"}
+                        ]
+                    }
+                }
+            ]
+
+            resultado = list(self.fletes_collection.aggregate(pipeline))
+            
+            if resultado:
+                data = resultado[0]
+                
+                # Helper para extraer totales de las facetas de conteo
+                def get_total(key):
+                    return data[key][0]["total"] if data.get(key) else 0
+
+                
+                return {
+                    "total_fletes": get_total("total_general"),
+                    "fletes_pendientes": get_total("pendientes"),
+                    "fletes_valorizados": get_total("valorizados_sin_factura"),
+                    "fletes_con_factura": get_total("valorizados_con_factura"),
+                }
+                
+            return {
+                "total_fletes": 0, 
+                "fletes_pendientes": 0, 
+                "fletes_valorizados": 0, 
+                "fletes_con_factura": 0, 
+            }
+
+        except Exception as e:
+            logger.error(f"Error al obtener resumen de fletes: {str(e)}")
             raise
