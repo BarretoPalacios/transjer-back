@@ -470,7 +470,6 @@ class GerenciaService:
             logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
             raise
 
-
     def _format_gestion_response(self, gestion: dict) -> dict:
         """
         Formatea la respuesta de una gestión de facturación con datos enriquecidos.
@@ -588,7 +587,6 @@ class GerenciaService:
                 "raw_data": gestion if logger.isEnabledFor(logging.DEBUG) else None
             }
 
-    # Mantener función original para compatibilidad
     def get_total_valorizado_cliente(
         self,
         nombre_cliente: str,
@@ -1040,126 +1038,175 @@ class GerenciaService:
             logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
             raise 
 
-#     def get_kpis_financieros_especificos(
-#         self,
-#         nombre_cliente: Optional[str] = None,
-#         fecha_inicio: Optional[datetime] = None,
-#         fecha_fin: Optional[datetime] = None
-#     ) -> dict:
-#         """
-#         Obtiene KPIs específicos: Vendido Neto/Bruto, Facturación Bruta, 
-#         Pendientes, Detracciones y Cobrados.
-#         """
-#         try:
-#             hoy = datetime.combine(datetime.now().date(), time.min)
-            
-#             # 1. Filtros de búsqueda
-#             query = {}
-#             if nombre_cliente:
-#                 query["datos_completos.fletes.servicio.nombre_cliente"] = {
-#                     "$regex": f"^{nombre_cliente}$", "$options": "i"
-#                 }
-#             if fecha_inicio or fecha_fin:
-#                 query["datos_completos.fecha_emision"] = {}
-#                 if fecha_inicio: query["datos_completos.fecha_emision"]["$gte"] = fecha_inicio
-#                 if fecha_fin: query["datos_completos.fecha_emision"]["$lte"] = fecha_fin
+    def get_resumen_financiero_cliente(
+        self,
+        nombre_cliente: Optional[str] = None,
+        fecha_inicio: Optional[datetime] = None,
+        fecha_fin: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """
+        Analiza la cartera de clientes desde la colección 'facturacion_gestion'.
+        Calcula montos considerando DETRACCIONES:
+        - Facturado (bruto)
+        - Detracción
+        - Neto real
+        - Neto pagado
+        - Neto pendiente
+        - Neto vencido
+        - Neto por vencer
+        """
+        try:
+            pipeline = []
+            ahora = datetime.now()
 
-#             # 2. Obtener Total Vendido Neto (Suma de fletes)
-#             # Reutilizamos tu lógica de valorización para el Neto
-#             res_valorizado = self.get_total_valorizado(nombre_cliente, fecha_inicio, fecha_fin)
-#             total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
-            
-#             # CÁLCULO: Vendido Bruto (Neto + 18%)
-#             total_vendido_bruto = (total_vendido_neto * Decimal("1.18")).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+            # 1. Filtros dinámicos
+            match_filters = {}
 
-#             # 3. Pipeline para Facturación (Basado en comprobantes emitidos)
-#             pipeline = [
-#                 {"$match": query},
-# {
-#     "$group": {
-#         "_id": None,
-#         "facturacion_bruta": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-#         "total_detracciones": {"$sum": {"$toDouble": "$monto_detraccion"}},
-#         "total_cobrado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}},
-        
-#         "total_vencido": {
-#             "$sum": {
-#                 "$cond": [
-#                     {
-#                         "$and": [
-#                             {"$lt": ["$datos_completos.fecha_vencimiento", hoy]},
-#                             {"$ne": ["$estado_pago_neto", "Pagado"]},
-#                             {"$ne": ["$estado_pago_neto", "Anulado"]}
-#                         ]
-#                     },
-#                     {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
-#                     0
-#                 ]
-#             }
-#         },
-#         "total_por_vencer": {
-#             "$sum": {
-#                 "$cond": [
-#                     {
-#                         "$and": [
-#                             {"$gte": ["$datos_completos.fecha_vencimiento", hoy]},
-#                             {"$ne": ["$estado_pago_neto", "Pagado"]},
-#                             {"$ne": ["$estado_pago_neto", "Anulado"]}
-#                         ]
-#                     },
-#                     {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]},
-#                     0
-#                 ]
-#             }
-#         }
-#     }
-# },
-# {
-#     # REDONDEO EN MONGODB: Evita que salgan números como 70.80000000000001
-#     "$project": {
-#         "facturacion_bruta": {"$round": ["$facturacion_bruta", 2]},
-#         "total_detracciones": {"$round": ["$total_detracciones", 2]},
-#         "total_cobrado": {"$round": ["$total_cobrado", 2]},
-#         "total_vencido": {"$round": ["$total_vencido", 2]},
-#         "total_por_vencer": {"$round": ["$total_por_vencer", 2]}
-#     }
-# }
-#             ]
+            if nombre_cliente:
+                match_filters["datos_completos.fletes.servicio.nombre_cliente"] = {
+                    "$regex": f"^{nombre_cliente}$",
+                    "$options": "i"
+                }
 
-#             result = list(self.collection.aggregate(pipeline))
-#             data = result[0] if result else {}
+            if fecha_inicio or fecha_fin:
+                date_filter = {}
+                if fecha_inicio:
+                    date_filter["$gte"] = fecha_inicio
+                if fecha_fin:
+                    date_filter["$lte"] = fecha_fin
+                match_filters["datos_completos.fecha_emision"] = date_filter
 
-#             # 4. Cálculos Finales con Decimal para precisión
-#             facturacion_bruta = Decimal(str(data.get("facturacion_bruta", 0)))
-#             detracciones = Decimal(str(data.get("total_detracciones", 0)))
-#             cobrado = Decimal(str(data.get("total_cobrado", 0)))
+            if match_filters:
+                pipeline.append({"$match": match_filters})
 
-#             # Facturación Bruta Pendiente = Vendido Bruto - Facturacion Bruta
-#             facturacion_bruta_pendiente = total_vendido_bruto - facturacion_bruta
-            
-#             # Pendiente por Cobrar = Facturación Bruta - Detracciones (Monto neto a recibir en cuenta)
-#             # Nota: Si prefieres que sea lo que falta cobrar realmente: (Fact. Bruta - Detracciones) - Cobrado
-#             # pendiente_por_cobrar = facturacion_bruta - detracciones - cobrado
-#             pendiente_por_cobrar = facturacion_bruta - detracciones 
+            # 2. Agrupación financiera (NETO)
+            pipeline.append({
+                "$group": {
+                    "_id": {
+                        "$arrayElemAt": [
+                            "$datos_completos.fletes.servicio.nombre_cliente",
+                            0
+                        ]
+                    },
 
+                    "total_facturas": {"$sum": 1},
 
-#             return {
-#                 "total_vendido_neto": float(total_vendido_neto),
-#                 "total_vendido_bruto": float(total_vendido_bruto),
-#                 "facturacion_bruta": float(facturacion_bruta),
-#                 "facturacion_bruta_pendiente": float(facturacion_bruta_pendiente),
-#                 "total_detracciones": float(detracciones),
-#                 "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar)),
-#                 "total_cobrado": float(cobrado),
-#                 "total_por_vencer": float(data.get("total_por_vencer", 0)),
-#                 "total_vencido": float(data.get("total_vencido", 0)),
-#                 "fletes":self.get_resumen_fletes_completo()
-#             }
+                    # BRUTO
+                    "total_facturado": {"$sum": "$datos_completos.monto_total"},
 
-#         except Exception as e:
-#             logger.error(f"Error en KPIs: {str(e)}")
-#             raise
+                    # DETRACCION
+                    "total_detraccion": {"$sum": "$monto_detraccion"},
 
+                    # NETO REAL
+                    "total_neto": {"$sum": "$monto_neto"},
+
+                    # NETO PAGADO
+                    "total_neto_pagado": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$estado_pago_neto", "Pagado"]},
+                                "$monto_neto",
+                                0
+                            ]
+                        }
+                    },
+
+                    # NETO PENDIENTE
+                    "total_neto_pendiente": {
+                        "$sum": {
+                            "$cond": [
+                                {"$ne": ["$estado_pago_neto", "Pagado"]},
+                                "$monto_neto",
+                                0
+                            ]
+                        }
+                    },
+
+                    # NETO VENCIDO
+                    "total_neto_vencido": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$lt": ["$datos_completos.fecha_vencimiento", ahora]},
+                                        {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                    ]
+                                },
+                                "$monto_neto",
+                                0
+                            ]
+                        }
+                    },
+
+                    # NETO POR VENCER
+                    "total_neto_por_vencer": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$datos_completos.fecha_vencimiento", ahora]},
+                                        {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                    ]
+                                },
+                                "$monto_neto",
+                                0
+                            ]
+                        }
+                    }
+                }
+            })
+
+            # 3. Orden por riesgo financiero
+            pipeline.append({
+                "$sort": {
+                    "total_neto_vencido": -1,
+                    "total_neto_pendiente": -1
+                }
+            })
+
+            resultados = list(
+                self.db["facturacion_gestion"].aggregate(pipeline)
+            )
+
+            # 4. Totales globales
+            resumen_global = {
+                "clientes_activos": len(resultados),
+                "gran_total_facturado": round(sum(r["total_facturado"] for r in resultados), 2),
+                "gran_total_detraccion": round(sum(r["total_detraccion"] for r in resultados), 2),
+                "gran_total_neto": round(sum(r["total_neto"] for r in resultados), 2),
+                "gran_total_neto_pagado": round(sum(r["total_neto_pagado"] for r in resultados), 2),
+                "gran_total_neto_pendiente": round(sum(r["total_neto_pendiente"] for r in resultados), 2),
+                "gran_total_neto_vencido": round(sum(r["total_neto_vencido"] for r in resultados), 2),
+                "gran_total_neto_por_vencer": round(sum(r["total_neto_por_vencer"] for r in resultados), 2)
+            }
+
+            return {
+                "resumen_general": resumen_global,
+                "detalle_por_cliente": [
+                    {
+                        "cliente": r["_id"],
+                        "nro_facturas": r["total_facturas"],
+
+                        "facturado": round(float(r["total_facturado"]), 2),
+                        "detraccion": round(float(r["total_detraccion"]), 2),
+                        "neto_total": round(float(r["total_neto"]), 2),
+
+                        "neto_pagado": round(float(r["total_neto_pagado"]), 2),
+                        "neto_pendiente": round(float(r["total_neto_pendiente"]), 2),
+                        "neto_vencido": round(float(r["total_neto_vencido"]), 2),
+                        "neto_por_vencer": round(float(r["total_neto_por_vencer"]), 2),
+
+                        "porcentaje_morosidad": round(
+                            (r["total_neto_vencido"] / r["total_neto"] * 100), 2
+                        ) if r["total_neto"] > 0 else 0
+                    }
+                    for r in resultados
+                ]
+            }
+
+        except Exception as e:
+            print(f"Error en agregación financiera: {e}")
+            raise
 
     def get_kpis_financieros_especificos(
             self,

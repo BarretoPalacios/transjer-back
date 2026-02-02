@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(utils_router,dependencies=[Depends(get_current_user)])
   
     app.include_router(gasto,dependencies=[Depends(get_current_user)])
-    app.include_router(gerencia,dependencies=[Depends(get_current_user)])
+    app.include_router(gerencia)
 
     app.include_router(servicioshistorico_router,dependencies=[Depends(get_current_user)])
 

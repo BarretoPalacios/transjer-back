@@ -260,6 +260,63 @@ def obtener_resumen_por_cliente(
         logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
+@router.get("/resumen-financiero-por-cliente")
+def obtener_resumen_financiero_por_cliente(
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+    nombre_cliente: Optional[str] = Query(None, description="Nombre del cliente (case-insensitive, opcional)"),
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio del servicio (YYYY-MM-DD) (opcional)"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin del servicio (YYYY-MM-DD) (opcional)")
+):
+    """
+    Obtiene un ranking de ventas agrupado por cliente, permitiendo filtrar por nombre y fechas.
+    """
+    try:
+        # Convertir fechas de string a datetime
+        fecha_inicio_dt = None
+        fecha_fin_dt = None
+        
+        if fecha_inicio:
+            try:
+                fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Formato de fecha_inicio inválido. Use YYYY-MM-DD"
+                )
+        
+        if fecha_fin:
+            try:
+                fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+                # Ajustar fecha_fin al final del día (23:59:59)
+                fecha_fin_dt = datetime.combine(fecha_fin_dt.date(), datetime.max.time())
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Formato de fecha_fin inválido. Use YYYY-MM-DD"
+                )
+        
+        # Validar rango de fechas
+        if fecha_inicio_dt and fecha_fin_dt and fecha_inicio_dt > fecha_fin_dt:
+            raise HTTPException(
+                status_code=400, 
+                detail="La fecha de inicio no puede ser mayor a la fecha de fin"
+            )
+        
+        # Llamar al servicio que creamos anteriormente
+        resultado = gerencia_service.get_resumen_financiero_cliente(
+            nombre_cliente=nombre_cliente,
+            fecha_inicio=fecha_inicio_dt,
+            fecha_fin=fecha_fin_dt
+        )
+        
+        return resultado
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
 
 @router.get("/get_kpis_financieros_especificos")
 def get_kpis_financieros_especificos(
