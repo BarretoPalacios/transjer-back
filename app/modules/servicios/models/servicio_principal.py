@@ -55,16 +55,16 @@ class ServicioPrincipal(BaseModel):
     fecha_salida: Optional[date] = Field(None, description="Fecha de salida")
     hora_cita: Optional[time] = Field(None, description="Hora de cita")
     
-    gia_rr: Optional[str] = Field(None, max_length=100, description="Guía de Remisión Remitente")
-    gia_rt: Optional[str] = Field(None, max_length=100, description="Guía de Remisión Transportista")
+    gia_rr: Optional[str] = Field(None, description="Guía de Remisión Remitente")
+    gia_rt: Optional[str] = Field(None, description="Guía de Remisión Transportista")
     
     descripcion: Optional[str] = Field(None, max_length=200, description="Descripción del servicio")
     
-    origen: str = Field(..., max_length=300, description="Dirección de origen")
-    destino: str = Field(..., max_length=300, description="Dirección de destino")
-    cliente_destino: Optional[str] = Field(None, max_length=200, description="Cliente en destino")
+    origen: str = Field(..., description="Dirección de origen")
+    destino: str = Field(..., description="Dirección de destino")
+    cliente_destino: Optional[str] = Field(None, description="Cliente en destino")
     
-    responsable: Optional[str] = Field(None, max_length=100, description="Gerente o responsable")
+    responsable: Optional[str] = Field(None, description="Gerente o responsable")
     
     estado: EstadoServicio = Field(default=EstadoServicio.PROGRAMADO, description="Estado del servicio")
     
