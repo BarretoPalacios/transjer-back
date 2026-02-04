@@ -258,6 +258,44 @@ class FleteService:
             logger.error(f"Error al crear flete: {str(e)}")
             raise
     
+    def delete_flete(self, flete_id: str) -> bool:
+            """
+            Elimina un flete y actualiza el estado del servicio asociado.
+            """
+            try:
+                # 1. Buscar el flete antes de eliminarlo para obtener la referencia al servicio
+                flete = self.collection.find_one({"_id": ObjectId(flete_id)})
+                
+                if not flete:
+                    logger.warning(f"Intento de eliminar flete inexistente: {flete_id}")
+                    return False
+
+                servicio_id = flete.get("servicio_id") # Asumiendo que guardas esta relación
+
+                # 2. Eliminar el flete
+                result = self.collection.delete_one({"_id": ObjectId(flete_id)})
+
+                if result.deleted_count > 0:
+                    # 3. Si hay un servicio asociado, actualizar su estado
+                    if servicio_id:
+                        self.db["servicio_principal"].update_one(
+                            {"_id": ObjectId(servicio_id)},
+                            {"$set": {
+                                "estado": "Cancelado",
+                                  "flete_asignado": False,
+                                  "es_editable": False,
+                                  "es_eliminable": False}}
+                        )
+                    
+                    logger.info(f"Flete {flete_id} eliminado exitosamente y servicio {servicio_id} actualizado.")
+                    return True
+                
+                return False
+
+            except Exception as e:
+                logger.error(f"Error al eliminar flete {flete_id}: {str(e)}")
+                raise
+    
     def get_flete_by_id(self, flete_id: str) -> Optional[dict]:
         """Obtener flete por ID"""
         try:
