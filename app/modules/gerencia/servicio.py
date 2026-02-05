@@ -1345,7 +1345,8 @@ class GerenciaService:
                 "total_detracciones": float(detracciones),
                 "cnt_detracciones": data.get("cnt_detracciones", 0), # Conteo facturas con detracción
                 
-                "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar)),
+                "facturacion_bruta_con_detraccion":float(max(0, pendiente_por_cobrar)),
+                "pendiente_por_cobrar": float(max(0, pendiente_por_cobrar - cobrado)),
                 
                 "total_cobrado": float(cobrado),
                 "cnt_cobrado": data.get("cnt_cobrado", 0), # Conteo facturas cobradas
