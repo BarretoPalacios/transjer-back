@@ -669,7 +669,7 @@ class FacturacionGestionService:
             
             if not gestiones:
                 df = pd.DataFrame(columns=[
-                    "ID", "Código Factura", "Número Factura", "Cliente", "Proveedor",
+                    "ID", "Código Factura", "Número Factura","Fecha Emision","Fecha Vencimiento", "Cliente", "Proveedor",
                     "Placa", "Conductor", "Auxiliar", "Tipo Servicio", "Zona",
                     "Fecha Servicio", "Origen", "Destino",
                     "Estado Pago Neto", "Estado Detracción",
@@ -689,6 +689,8 @@ class FacturacionGestionService:
                         "ID": gestion.get("id", ""),
                         "Código Factura": gestion.get("codigo_factura", ""),
                         "Número Factura": datos.get("numero_factura", ""),
+                        "Fecha Emision": datos.get("fecha_emision", ""),
+                        "Fecha Vencimiento": datos.get("fecha_vencimiento", ""),
                         "Cliente": servicio.get("nombre_cliente", ""),
                         "Proveedor": servicio.get("nombre_proveedor", ""),
                         "Placa": servicio.get("placa_flota", ""),
