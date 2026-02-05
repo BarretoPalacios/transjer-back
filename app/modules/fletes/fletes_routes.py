@@ -225,14 +225,14 @@ def eliminar_flete(flete_id: str):
 
 @router.get("/export/excel")
 def exportar_fletes_excel(
-    estado: Optional[str] = Query(None)
-
+    estado: Optional[str] = Query(None),
+    pertenece_a_factura: Optional[bool] = Query(None)
 ):
     try:
         db = get_database()
         fletesService = FleteService(db)
     
-        excel_file = fletesService.export_fletes_to_excel(filter_params={"estado": estado})
+        excel_file = fletesService.export_fletes_to_excel(filter_params={"estado_flete": estado, "pertenece_a_factura": pertenece_a_factura})
         
         return StreamingResponse(
             excel_file,
