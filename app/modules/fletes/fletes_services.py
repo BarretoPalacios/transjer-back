@@ -490,6 +490,7 @@ class FleteService:
                         # --- Datos del SERVICIO (Anidados) ---
                         "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
                         "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
+                        "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
                         "Cliente": srv.get("cliente", {}).get("nombre", ""),
                         "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
                         "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
@@ -500,6 +501,7 @@ class FleteService:
                         "Destino": srv.get("destino", ""),
                         "Zona": srv.get("zona", ""),
                         "Tipo": srv.get("tipo_servicio", ""),
+                        "Modalidad Servicio": srv.get("modalidad_servicio", ""),
                         "M3": srv.get("m3", ""),
                         "TN": srv.get("tn", ""),
                         "Guía RR": srv.get("gia_rr", ""),
