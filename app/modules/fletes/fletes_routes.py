@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
+from fastapi.responses import StreamingResponse
 from datetime import datetime
 from app.core.database import get_database
 from app.modules.fletes.fletes_services import FleteService
@@ -221,6 +222,30 @@ def eliminar_flete(flete_id: str):
     except Exception as e:
         logger.error(f"Error al eliminar flete: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+@router.get("/export/excel")
+def exportar_fletes_excel(
+    estado: Optional[str] = Query(None)
+
+):
+    try:
+        db = get_database()
+        fletesService = FleteService(db)
+    
+        excel_file = fletesService.export_fletes_to_excel(filter_params={"estado": estado})
+        
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=fletes.xlsx"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error al exportar fletes a Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
 
 @router.get("/stats/estadisticas")
 def obtener_estadisticas_fletes():
