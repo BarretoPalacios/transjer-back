@@ -1212,12 +1212,10 @@ class GerenciaService:
             self,
             nombre_cliente: Optional[str] = None,
             fecha_inicio: Optional[datetime] = None,
-            fecha_fin: Optional[datetime] = None
+            fecha_fin: Optional[datetime] = None,
+            mes: Optional[int] = None,  # Nuevo parámetro
+            anio: Optional[int] = None   # Nuevo parámetro
         ) -> dict:
-        """
-        Obtiene KPIs específicos: Vendido Neto/Bruto, Facturación Bruta, 
-        Pendientes, Detracciones y Cobrados, incluyendo conteos de documentos.
-        """
         try:
             hoy = datetime.combine(datetime.now().date(), time.min)
             
@@ -1227,12 +1225,23 @@ class GerenciaService:
                 query["datos_completos.fletes.servicio.nombre_cliente"] = {
                     "$regex": f"^{nombre_cliente}$", "$options": "i"
                 }
+
+            # Filtro por Rango de Fechas Exacto
             if fecha_inicio or fecha_fin:
                 query["datos_completos.fecha_emision"] = {}
                 if fecha_inicio: query["datos_completos.fecha_emision"]["$gte"] = fecha_inicio
                 if fecha_fin: query["datos_completos.fecha_emision"]["$lte"] = fecha_fin
+            
+            # Filtro por Mes y Año (Usando operadores de agregación en el query)
+            if anio:
+                query["$expr"] = query.get("$expr", {"$and": []})
+                query["$expr"]["$and"].append({"$eq": [{"$year": "$datos_completos.fecha_emision"}, anio]})
+            
+            if mes:
+                query["$expr"] = query.get("$expr", {"$and": []})
+                query["$expr"]["$and"].append({"$eq": [{"$month": "$datos_completos.fecha_emision"}, mes]})
 
-            # 2. Obtener Total Vendido Neto y Conteo de Fletes
+            # 2. Obtener Total Vendido Neto (Asegúrate de pasar los nuevos filtros a esta función también)
             res_valorizado = self.get_total_valorizado(nombre_cliente, fecha_inicio, fecha_fin)
             total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
             # cantidad_fletes = res_valorizado.get("cantidad_fletes", 0) # Asumiendo que tu función ya devuelve este conteo

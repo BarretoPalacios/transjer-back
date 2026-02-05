@@ -323,14 +323,18 @@ def get_kpis_financieros_especificos(
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
 nombre_cliente: Optional[str] = None,
         fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None
+        fecha_fin: Optional[datetime] = None,
+        mes: Optional[int] = None,
+        anio: Optional[int] = None,
 ):
 
     try:
         resultado = gerencia_service.get_kpis_financieros_especificos(
             nombre_cliente=nombre_cliente,
             fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin
+            fecha_fin=fecha_fin,
+            mes=mes,
+            anio=anio
         )
         
         return resultado
