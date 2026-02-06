@@ -37,3 +37,60 @@ async def consultar_ruc(ruc: str):
     ruc_service = RucService()
 
     return ruc_service.consultar_ruc(ruc)
+
+
+@router.get("/clientes-list")
+async def get_razones_sociales():
+    # 1. Lista estática solicitada
+    lista_estatica = [
+        "OECHSLE", "SONEPAR", "CALERA", "ALICORP", "INFINIA", 
+        "BOX PERU", "GYG VENTILACION", "AMAUTA", "BASA", 
+        "CLOUDATEL", "LINKSOLUTIONS"
+    ]
+
+    # Conexión a la base de datos
+    db = get_database()
+    colecc = db["clientes"]
+    
+    # 2. Traer solo los valores únicos del campo 'razon_social' de la DB
+    # Usamos distinct para no traer documentos enteros y saturar la memoria
+    razones_db = colecc.distinct("razon_social")
+    
+    # 3. Unir listas, eliminar duplicados con set() y limpiar posibles nulos
+    # El set se encarga de que si "ALICORP" está en ambos, solo aparezca una vez
+    combinada = set(lista_estatica) | {r for r in razones_db if r}
+    
+    # 4. Retornar lista ordenada alfabéticamente
+    return sorted(list(combinada))
+    
+@router.get("/proveedores-list")
+async def get_proveedores_list():
+    # 1. Lista estática de transportistas
+    # He separado los nombres que venían pegados para que el select sea legible
+    lista_estatica = [
+        "Transporte Transjer", 
+        "Transporte Guerrero",
+        "Transporte Taboada",
+        "Transporte Ccorimayo",
+        "Transporte Cabrera",
+        "Transporte Liñan",
+        "Transporte Parodi",
+        "Transporte Jesus",
+        "Transporte Leober"
+    ]
+
+    # Conexión a la base de datos
+    db = get_database()
+    # Cambiamos a la colección de proveedores
+    colecc = db["proveedores"] 
+    
+    # 2. Traer valores únicos de la base de datos
+    # Si tu colección de proveedores usa el mismo campo 'razon_social'
+    proveedores_db = colecc.distinct("razon_social")
+    
+    # 3. Unir ambas listas y eliminar duplicados
+    # Usamos set para asegurar valores únicos y filtramos nulos
+    combinada = set(lista_estatica) | {p for p in proveedores_db if p}
+    
+    # 4. Retornar lista ordenada alfabéticamente
+    return sorted(list(combinada))
