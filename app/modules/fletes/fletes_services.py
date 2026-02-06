@@ -449,70 +449,172 @@ class FleteService:
             logger.error(f"Error al obtener estadísticas: {str(e)}")
             return {}
 
-    def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
-        """Exportar fletes vinculando datos detallados del servicio asociado"""
-        try:
-            # 1. Obtener los fletes desde la colección
-            fletes = list(self.collection.find(filter_params or {}))
+    # def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
+    #     """Exportar fletes vinculando datos detallados del servicio asociado"""
+    #     try:
+    #         # 1. Obtener los fletes desde la colección
+    #         fletes = list(self.collection.find(filter_params or {}))
             
-            if not fletes:
-                # Columnas mínimas para un archivo estructurado aunque esté vacío
-                df = pd.DataFrame(columns=["Código Flete", "Monto", "Cliente", "Estado"])
-            else:
-                excel_data = []
-                for flete in fletes:
-                    # 2. Buscar el servicio asociado
-                    servicio_id = flete.get("servicio_id")
-                    srv = {}
+    #         if not fletes:
+    #             # Columnas mínimas para un archivo estructurado aunque esté vacío
+    #             df = pd.DataFrame(columns=["Código Flete", "Monto", "Cliente", "Estado"])
+    #         else:
+    #             excel_data = []
+    #             for flete in fletes:
+    #                 # 2. Buscar el servicio asociado
+    #                 servicio_id = flete.get("servicio_id")
+    #                 srv = {}
                     
-                    if servicio_id:
+    #                 if servicio_id:
                         
-                        # Se busca en la colección de servicios configurada en tu clase
-                        srv = self.servicios_collection.find_one({"_id": ObjectId(servicio_id)}) or {}
+    #                     # Se busca en la colección de servicios configurada en tu clase
+    #                     srv = self.servicios_collection.find_one({"_id": ObjectId(servicio_id)}) or {}
 
-                    # --- Procesamiento de Listas (Conductor/Auxiliar) ---
-                    conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
-                    auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
+    #                 # --- Procesamiento de Listas (Conductor/Auxiliar) ---
+    #                 conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
+    #                 auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
                     
-                    # --- Procesamiento de Fechas (Formatos de MongoDB) ---
-                    def format_mongo_date(date_field):
-                        if isinstance(date_field, dict) and "$date" in date_field:
-                            return date_field["$date"]
-                        return date_field
+    #                 # --- Procesamiento de Fechas (Formatos de MongoDB) ---
+    #                 def format_mongo_date(date_field):
+    #                     if isinstance(date_field, dict) and "$date" in date_field:
+    #                         return date_field["$date"]
+    #                     return date_field
 
-                    excel_data.append({
-                        "Código Flete": flete.get("codigo_flete", ""),
-                        "Monto Flete": float(flete.get("monto_flete", 0)),
-                        "Estado Flete": flete.get("estado_flete", ""),
-                        "Factura": flete.get("codigo_factura", "PENDIENTE"),
-                        "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
+    #                 excel_data.append({
+    #                     "Código Flete": flete.get("codigo_flete", ""),
+    #                     "Monto Flete": float(flete.get("monto_flete", 0)),
+    #                     "Estado Flete": flete.get("estado_flete", ""),
+    #                     "Factura": flete.get("codigo_factura", "PENDIENTE"),
+    #                     "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
                         
-                        # --- Datos del SERVICIO (Anidados) ---
-                        "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
-                        "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
-                        "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
-                        "Cliente": srv.get("cliente", {}).get("nombre", ""),
-                        "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
-                        "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
-                        "Placa": srv.get("flota", {}).get("placa", ""),
-                        "Conductor": conductor_info.get("nombre", ""),
-                        "Auxiliar": auxiliar_info.get("nombre", ""),
-                        "Origen": srv.get("origen", ""),
-                        "Destino": srv.get("destino", ""),
-                        "Zona": srv.get("zona", ""),
-                        "Tipo": srv.get("tipo_servicio", ""),
-                        "Modalidad Servicio": srv.get("modalidad_servicio", ""),
-                        "M3": srv.get("m3", ""),
-                        "TN": srv.get("tn", ""),
-                        "Guía RR": srv.get("gia_rr", ""),
-                        "Guía RT": srv.get("gia_rt", ""),
-                        "Estado Servicio": srv.get("estado", ""),
-                        "Observaciones": flete.get("observaciones", "")
-                    })
+    #                     # --- Datos del SERVICIO (Anidados) ---
+    #                     "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
+    #                     "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
+    #                     "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
+    #                     "Cliente": srv.get("cliente", {}).get("nombre", ""),
+    #                     "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
+    #                     "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
+    #                     "Placa": srv.get("flota", {}).get("placa", ""),
+    #                     "Conductor": conductor_info.get("nombre", ""),
+    #                     "Auxiliar": auxiliar_info.get("nombre", ""),
+    #                     "Origen": srv.get("origen", ""),
+    #                     "Destino": srv.get("destino", ""),
+    #                     "Zona": srv.get("zona", ""),
+    #                     "Tipo": srv.get("tipo_servicio", ""),
+    #                     "Modalidad Servicio": srv.get("modalidad_servicio", ""),
+    #                     "M3": srv.get("m3", ""),
+    #                     "TN": srv.get("tn", ""),
+    #                     "Guía RR": srv.get("gia_rr", ""),
+    #                     "Guía RT": srv.get("gia_rt", ""),
+    #                     "Estado Servicio": srv.get("estado", ""),
+    #                     "Observaciones": flete.get("observaciones", "")
+    #                 })
                 
+    #             df = pd.DataFrame(excel_data)
+
+    #         # 3. Generación del Excel
+    #         output = BytesIO()
+    #         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    #             df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
+                
+    #             from openpyxl.styles import Font, PatternFill, Alignment
+                
+    #             worksheet = writer.sheets['Reporte Fletes']
+    #             header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    #             header_font = Font(color="FFFFFF", bold=True)
+                
+    #             # Formatear cabecera
+    #             for cell in worksheet[1]:
+    #                 cell.fill = header_fill
+    #                 cell.font = header_font
+    #                 cell.alignment = Alignment(horizontal="center", vertical="center")
+                
+    #             # Auto-ajuste inteligente de columnas
+    #             for column in worksheet.columns:
+    #                 max_length = 0
+    #                 column_letter = column[0].column_letter
+    #                 for cell in column:
+    #                     try:
+    #                         if len(str(cell.value)) > max_length:
+    #                             max_length = len(str(cell.value))
+    #                     except: pass
+    #                 # Un poco de aire extra y límite de 50 para que no sea gigante
+    #                 worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
+
+    #         output.seek(0)
+    #         return output
+            
+    #     except Exception as e:
+    #         logger.error(f"Error en export_fletes_to_excel: {str(e)}")
+    #         raise
+
+    def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
+        try:
+            query = filter_params.copy() if filter_params else {}
+            cliente_a_filtrar = query.pop("cliente_nombre", None)
+
+            fletes = list(self.collection.find(query))
+            
+            excel_data = []
+            
+            for flete in fletes:
+                servicio_id = flete.get("servicio_id")
+                srv = {}
+                
+                if servicio_id:
+                    try:
+                        search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
+                        srv = self.servicios_collection.find_one({"_id": search_id}) or {}
+                    except:
+                        srv = {}
+
+                nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
+                
+                if cliente_a_filtrar:
+                    if cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
+                        continue
+
+                conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
+                auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
+                
+                def format_mongo_date(date_field):
+                    if isinstance(date_field, dict) and "$date" in date_field:
+                        return date_field["$date"]
+                    return date_field
+
+                excel_data.append({
+                    "Código Flete": flete.get("codigo_flete", ""),
+                    "Monto Flete": float(flete.get("monto_flete", 0)),
+                    "Estado Flete": flete.get("estado_flete", ""),
+                    "Factura": flete.get("codigo_factura", "PENDIENTE"),
+                    "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
+                    "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
+                    "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
+                    "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
+                    "Cliente": nombre_cliente_db,
+                    "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
+                    "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
+                    "Placa": srv.get("flota", {}).get("placa", ""),
+                    "Conductor": conductor_info.get("nombre", ""),
+                    "Auxiliar": auxiliar_info.get("nombre", ""),
+                    "Origen": srv.get("origen", ""),
+                    "Destino": srv.get("destino", ""),
+                    "Zona": srv.get("zona", ""),
+                    "Tipo": srv.get("tipo_servicio", ""),
+                    "Modalidad Servicio": srv.get("modalidad_servicio", ""),
+                    "M3": srv.get("m3", ""),
+                    "TN": srv.get("tn", ""),
+                    "Guía RR": srv.get("gia_rr", ""),
+                    "Guía RT": srv.get("gia_rt", ""),
+                    "Estado Servicio": srv.get("estado", ""),
+                    "Observaciones": flete.get("observaciones", "")
+                })
+            
+            if not excel_data:
+                df = pd.DataFrame(columns=["Código Flete", "Monto Flete", "Cliente", "Estado Flete"])
+            else:
                 df = pd.DataFrame(excel_data)
 
-            # 3. Generación del Excel
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
@@ -523,13 +625,11 @@ class FleteService:
                 header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True)
                 
-                # Formatear cabecera
                 for cell in worksheet[1]:
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                 
-                # Auto-ajuste inteligente de columnas
                 for column in worksheet.columns:
                     max_length = 0
                     column_letter = column[0].column_letter
@@ -538,7 +638,6 @@ class FleteService:
                             if len(str(cell.value)) > max_length:
                                 max_length = len(str(cell.value))
                         except: pass
-                    # Un poco de aire extra y límite de 50 para que no sea gigante
                     worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
 
             output.seek(0)
@@ -547,6 +646,7 @@ class FleteService:
         except Exception as e:
             logger.error(f"Error en export_fletes_to_excel: {str(e)}")
             raise
+
 def safe_regex(value: str):
     if not value or not value.strip():
         return None
