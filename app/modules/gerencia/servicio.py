@@ -602,309 +602,6 @@ class GerenciaService:
             fecha_fin=fecha_fin
         )
         
-    def get_resumen_por_placa(
-        self,
-        placa: Optional[str] = None,
-        fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None
-    ) -> Dict[str, Any]:
-        """
-        Obtiene resumen de servicios agrupados por placa de flota.
-        Filtra por placa (opcional) y rango de fechas (opcional).
-        
-        Retorna:
-        - PLACA | TOTAL DE SERVICIOS | TOTAL VENDIDO
-        """
-        try:
-            # Construir pipeline de agregación
-            pipeline = []
-            
-            # 1. Match inicial en la colección de fletes (solo valorizados)
-            match_fletes = {
-                "estado_flete": "VALORIZADO",
-                "monto_flete": {"$gt": 0}
-            }
-            
-            pipeline.append({"$match": match_fletes})
-            
-            # 2. Lookup para obtener información del servicio
-            pipeline.append({
-                "$lookup": {
-                    "from": "servicio_principal",
-                    "let": {"servicio_id_str": "$servicio_id"},
-                    "pipeline": [
-                        {
-                            "$match": {
-                                "$expr": {
-                                    "$eq": [
-                                        {"$toString": "$_id"},
-                                        "$$servicio_id_str"
-                                    ]
-                                }
-                            }
-                        }
-                    ],
-                    "as": "info_servicio"
-                }
-            })
-            
-            # 3. Desempaquetar el servicio
-            pipeline.append({
-                "$unwind": {
-                    "path": "$info_servicio",
-                    "preserveNullAndEmptyArrays": False
-                }
-            })
-            
-            # 4. Construir filtros dinámicos
-            match_filters = {}
-            
-            # Filtro por placa (case-insensitive)
-            if placa:
-                match_filters["info_servicio.flota.placa"] = {
-                    "$regex": f"^{placa}$",
-                    "$options": "i"
-                }
-            
-            # Filtro por rango de fechas
-            if fecha_inicio and fecha_fin:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$gte": fecha_inicio,
-                    "$lte": fecha_fin
-                }
-            elif fecha_inicio:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$gte": fecha_inicio
-                }
-            elif fecha_fin:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$lte": fecha_fin
-                }
-            
-            # Aplicar filtros si existen
-            if match_filters:
-                pipeline.append({"$match": match_filters})
-            
-            # 5. Agrupar por placa
-            pipeline.append({
-                "$group": {
-                    "_id": "$info_servicio.flota.placa",
-                    "total_servicios": {"$sum": 1},
-                    "total_vendido": {"$sum": {"$toDouble": "$monto_flete"}},
-                    "codigos_servicio": {"$addToSet": "$info_servicio.codigo_servicio_principal"},
-                    "codigos_flete": {"$addToSet": "$codigo_flete"}
-                }
-            })
-            
-            # 6. Ordenar por placa
-            pipeline.append({
-                "$sort": {"_id": 1}
-            })
-            
-            # 7. Proyectar el formato final
-            pipeline.append({
-                "$project": {
-                    "_id": 0,
-                    "placa": "$_id",
-                    "total_servicios": 1,
-                    "total_vendido": 1,
-                    "codigos_servicio": 1,
-                    "codigos_flete": 1
-                }
-            })
-            
-            # 8. Ejecutar pipeline
-            logger.info(f"Pipeline resumen por placa: {pipeline}")
-            resultados = list(self.fletes_collection.aggregate(pipeline))
-            
-            # 9. Calcular totales generales
-            total_general_servicios = sum(r["total_servicios"] for r in resultados)
-            total_general_vendido = sum(r["total_vendido"] for r in resultados)
-            total_placas = len(resultados)
-            
-            # 10. Formatear respuesta
-            return {
-                "resumen": {
-                    "total_placas": total_placas,
-                    "total_servicios": total_general_servicios,
-                    "total_vendido": float(total_general_vendido)
-                },
-                "filtros_aplicados": {
-                    "placa": placa,
-                    "fecha_inicio": fecha_inicio.isoformat() if fecha_inicio else None,
-                    "fecha_fin": fecha_fin.isoformat() if fecha_fin else None
-                },
-                "detalle_por_placa": [
-                    {
-                        "placa": r["placa"],
-                        "total_servicios": r["total_servicios"],
-                        "total_vendido": float(r["total_vendido"]),
-                        "cantidad_servicios_distintos": len(r.get("codigos_servicio", [])),
-                        "cantidad_fletes": len(r.get("codigos_flete", []))
-                    }
-                    for r in resultados
-                ]
-            }
-            
-        except Exception as e:
-            logger.error(f"Error al obtener resumen por placa: {str(e)}", exc_info=True)
-            raise
-
-    def get_resumen_por_proveedor(
-        self,
-        nombre_proveedor: Optional[str] = None,
-        fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None
-    ) -> Dict[str, Any]:
-        """
-        Obtiene resumen de servicios agrupados por proveedor.
-        Filtra por proveedor (opcional) y rango de fechas (opcional).
-        
-        Retorna:
-        - PROVEEDOR | TOTAL DE SERVICIOS | TOTAL VENDIDO
-        """
-        try:
-            # Construir pipeline de agregación
-            pipeline = []
-            
-            # 1. Match inicial en la colección de fletes (solo valorizados)
-            match_fletes = {
-                "estado_flete": "VALORIZADO",
-                "monto_flete": {"$gt": 0}
-            }
-            
-            pipeline.append({"$match": match_fletes})
-            
-            # 2. Lookup para obtener información del servicio
-            pipeline.append({
-                "$lookup": {
-                    "from": "servicio_principal",
-                    "let": {"servicio_id_str": "$servicio_id"},
-                    "pipeline": [
-                        {
-                            "$match": {
-                                "$expr": {
-                                    "$eq": [
-                                        {"$toString": "$_id"},
-                                        "$$servicio_id_str"
-                                    ]
-                                }
-                            }
-                        }
-                    ],
-                    "as": "info_servicio"
-                }
-            })
-            
-            # 3. Desempaquetar el servicio
-            pipeline.append({
-                "$unwind": {
-                    "path": "$info_servicio",
-                    "preserveNullAndEmptyArrays": False
-                }
-            })
-            
-            # 4. Construir filtros dinámicos
-            match_filters = {}
-            
-            # Filtro por proveedor (case-insensitive)
-            if nombre_proveedor:
-                match_filters["info_servicio.proveedor.nombre"] = {
-                    "$regex": f"^{nombre_proveedor}$",
-                    "$options": "i"
-                }
-            
-            # Filtro por rango de fechas
-            if fecha_inicio and fecha_fin:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$gte": fecha_inicio,
-                    "$lte": fecha_fin
-                }
-            elif fecha_inicio:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$gte": fecha_inicio
-                }
-            elif fecha_fin:
-                match_filters["info_servicio.fecha_servicio"] = {
-                    "$lte": fecha_fin
-                }
-            
-            # Aplicar filtros si existen
-            if match_filters:
-                pipeline.append({"$match": match_filters})
-            
-            # 5. Agrupar por proveedor
-            pipeline.append({
-                "$group": {
-                    "_id": "$info_servicio.proveedor.nombre",
-                    "total_servicios": {"$sum": 1},
-                    "total_vendido": {"$sum": {"$toDouble": "$monto_flete"}},
-                    "codigos_servicio": {"$addToSet": "$info_servicio.codigo_servicio_principal"},
-                    "codigos_flete": {"$addToSet": "$codigo_flete"},
-                    # Información adicional del proveedor
-                    "razon_social": {"$first": "$info_servicio.proveedor.razon_social"},
-                    "ruc": {"$first": "$info_servicio.proveedor.ruc"}
-                }
-            })
-            
-            # 6. Ordenar por nombre de proveedor
-            pipeline.append({
-                "$sort": {"_id": 1}
-            })
-            
-            # 7. Proyectar el formato final
-            pipeline.append({
-                "$project": {
-                    "_id": 0,
-                    "proveedor": "$_id",
-                    "razon_social": 1,
-                    "ruc": 1,
-                    "total_servicios": 1,
-                    "total_vendido": 1,
-                    "codigos_servicio": 1,
-                    "codigos_flete": 1
-                }
-            })
-            
-            # 8. Ejecutar pipeline
-            logger.info(f"Pipeline resumen por proveedor: {pipeline}")
-            resultados = list(self.fletes_collection.aggregate(pipeline))
-            
-            # 9. Calcular totales generales
-            total_general_servicios = sum(r["total_servicios"] for r in resultados)
-            total_general_vendido = sum(r["total_vendido"] for r in resultados)
-            total_proveedores = len(resultados)
-            
-            # 10. Formatear respuesta
-            return {
-                "resumen": {
-                    "total_proveedores": total_proveedores,
-                    "total_servicios": total_general_servicios,
-                    "total_vendido": float(total_general_vendido)
-                },
-                "filtros_aplicados": {
-                    "proveedor": nombre_proveedor,
-                    "fecha_inicio": fecha_inicio.isoformat() if fecha_inicio else None,
-                    "fecha_fin": fecha_fin.isoformat() if fecha_fin else None
-                },
-                "detalle_por_proveedor": [
-                    {
-                        "proveedor": r["proveedor"],
-                        "razon_social": r.get("razon_social", ""),
-                        "ruc": r.get("ruc", ""),
-                        "total_servicios": r["total_servicios"],
-                        "total_vendido": float(r["total_vendido"]),
-                        "cantidad_servicios_distintos": len(r.get("codigos_servicio", [])),
-                        "cantidad_fletes": len(r.get("codigos_flete", []))
-                    }
-                    for r in resultados
-                ]
-            }
-            
-        except Exception as e:
-            logger.error(f"Error al obtener resumen por proveedor: {str(e)}", exc_info=True)
-            raise
-
     def get_resumen_por_cliente(
         self,
         nombre_cliente: Optional[str] = None,
@@ -1042,22 +739,28 @@ class GerenciaService:
         self,
         nombre_cliente: Optional[str] = None,
         fecha_inicio: Optional[datetime] = None,
-        fecha_fin: Optional[datetime] = None
+        fecha_fin: Optional[datetime] = None,
+        mes: Optional[int] = None,  # Nuevo parámetro
+        anio: Optional[int] = None   # Nuevo parámetro
     ) -> Dict[str, Any]:
-        """
-        Analiza la cartera de clientes desde la colección 'facturacion_gestion'.
-        Calcula montos considerando DETRACCIONES:
-        - Facturado (bruto)
-        - Detracción
-        - Neto real
-        - Neto pagado
-        - Neto pendiente
-        - Neto vencido
-        - Neto por vencer
-        """
+
         try:
             pipeline = []
             ahora = datetime.now()
+
+            # --- Lógica sin calendar ---
+            if mes and anio:
+                # Inicio del mes solicitado
+                fecha_inicio = datetime(anio, mes, 1)
+                
+                # Calculamos el inicio del mes siguiente
+                if mes == 12:
+                    siguiente_mes = datetime(anio + 1, 1, 1)
+                else:
+                    siguiente_mes = datetime(anio, mes + 1, 1)
+                
+                # El fin es un segundo antes de que empiece el mes siguiente
+                fecha_fin = siguiente_mes - timedelta(seconds=1)
 
             # 1. Filtros dinámicos
             match_filters = {}

@@ -147,7 +147,6 @@ def obtener_resumen_por_placa(
         logger.error(f"Error al obtener resumen por placa: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor") 
 
-
 @router.get("/resumen-por-proveedor")
 def obtener_resumen_por_proveedor(
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
@@ -264,49 +263,48 @@ def obtener_resumen_por_cliente(
 def obtener_resumen_financiero_por_cliente(
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
     nombre_cliente: Optional[str] = Query(None, description="Nombre del cliente (case-insensitive, opcional)"),
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio del servicio (YYYY-MM-DD) (opcional)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin del servicio (YYYY-MM-DD) (opcional)")
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    mes: Optional[int] = Query(None, ge=1, le=12, description="Número de mes (1-12)"),
+    anio: Optional[int] = Query(None, ge=2000, description="Año (ej. 2026)")
 ):
     """
-    Obtiene un ranking de ventas agrupado por cliente, permitiendo filtrar por nombre y fechas.
+    Obtiene un ranking de ventas agrupado por cliente. 
+    Puede filtrar por nombre, rango exacto de fechas, o por un mes/año específico.
     """
     try:
-        # Convertir fechas de string a datetime
         fecha_inicio_dt = None
         fecha_fin_dt = None
         
+        # 1. Validación de formato de fechas tradicionales
         if fecha_inicio:
             try:
                 fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
             except ValueError:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Formato de fecha_inicio inválido. Use YYYY-MM-DD"
-                )
+                raise HTTPException(status_code=400, detail="Formato de fecha_inicio inválido. Use YYYY-MM-DD")
         
         if fecha_fin:
             try:
                 fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
-                # Ajustar fecha_fin al final del día (23:59:59)
                 fecha_fin_dt = datetime.combine(fecha_fin_dt.date(), datetime.max.time())
             except ValueError:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Formato de fecha_fin inválido. Use YYYY-MM-DD"
-                )
+                raise HTTPException(status_code=400, detail="Formato de fecha_fin inválido. Use YYYY-MM-DD")
         
-        # Validar rango de fechas
+        # 2. Validación cruzada de fechas
         if fecha_inicio_dt and fecha_fin_dt and fecha_inicio_dt > fecha_fin_dt:
-            raise HTTPException(
-                status_code=400, 
-                detail="La fecha de inicio no puede ser mayor a la fecha de fin"
-            )
+            raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser mayor a la fecha de fin")
         
-        # Llamar al servicio que creamos anteriormente
+        # 3. Validación de lógica mes/año (si envías uno, deberías enviar el otro)
+        if (mes and not anio) or (anio and not mes):
+            raise HTTPException(status_code=400, detail="Para filtrar por mes, debes proporcionar tanto 'mes' como 'anio'")
+
+        # Llamar al servicio con los nuevos parámetros
         resultado = gerencia_service.get_resumen_financiero_cliente(
             nombre_cliente=nombre_cliente,
             fecha_inicio=fecha_inicio_dt,
-            fecha_fin=fecha_fin_dt
+            fecha_fin=fecha_fin_dt,
+            mes=mes,
+            anio=anio
         )
         
         return resultado
@@ -316,7 +314,6 @@ def obtener_resumen_financiero_por_cliente(
     except Exception as e:
         logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
-
 
 @router.get("/get_kpis_financieros_especificos")
 def get_kpis_financieros_especificos(
