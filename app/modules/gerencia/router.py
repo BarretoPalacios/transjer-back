@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime,timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 import logging
@@ -91,7 +91,66 @@ def obtener_kpis_completos(
     except Exception as e:
         logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
-    
+
+@router.get("/test-total-valorizado")
+def test_total_valorizado(
+    nombre_cliente: Optional[str] = Query(None),
+    fecha_inicio: Optional[str] = Query(None, description="Formato YYYY-MM-DD"),
+    fecha_fin: Optional[str] = Query(None, description="Formato YYYY-MM-DD"),
+    mes: Optional[int] = Query(None, ge=1, le=12),
+    anio: Optional[int] = Query(None, ge=2000),
+    gerencia_service: GerenciaService = Depends(get_gerencia_service)
+):
+    """
+    Endpoint de prueba para verificar el cálculo del total valorizado.
+    """
+    try:
+        f_inicio_dt = None
+        f_fin_dt = None
+
+        # 1. Prioridad: Si hay mes y año, calculamos el rango
+        if mes and anio:
+            # Restamos 5 horas al inicio para atrapar lo que se registró al final del mes anterior en UTC
+            f_inicio_dt = datetime(anio, mes, 1) - timedelta(hours=5)
+            
+            # Sumamos 5 horas al final
+            if mes == 12:
+                f_fin_dt = datetime(anio + 1, 1, 1) + timedelta(hours=5)
+            else:
+                f_fin_dt = datetime(anio, mes + 1, 1) + timedelta(hours=5)
+        
+        # 2. Si no hubo mes/año, intentamos con las fechas manuales
+        else:
+            if fecha_inicio:
+                f_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            if fecha_fin:
+                f_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+                f_fin_dt = datetime.combine(f_fin_dt.date(), datetime.max.time())
+
+        # 3. Llamada directa a tu función
+        resultado = gerencia_service.get_total_valorizado(
+            nombre_cliente=nombre_cliente,
+            fecha_inicio=f_inicio_dt,
+            fecha_fin=f_fin_dt
+        )
+
+        return {
+            "status": "success",
+            "filtros_aplicados": {
+                "cliente": nombre_cliente,
+                "rango_calculado": {
+                    "desde": f_inicio_dt.isoformat() if f_inicio_dt else None,
+                    "hasta": f_fin_dt.isoformat() if f_fin_dt else None
+                }
+            },
+            "data": resultado
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Error en formato de datos: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
 @router.get("/resumen-por-placa")
 def obtener_resumen_por_placa(
     gerencia_service: GerenciaService = Depends(get_gerencia_service),

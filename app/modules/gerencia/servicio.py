@@ -778,6 +778,8 @@ class GerenciaService:
                 if fecha_fin:
                     date_filter["$lte"] = fecha_fin
                 match_filters["datos_completos.fecha_emision"] = date_filter
+                # en el caso sea por servicios
+                # match_filters["datos_completos.fletes.servicio.fecha_servicio"] = date_filter
 
             if match_filters:
                 pipeline.append({"$match": match_filters})
@@ -929,6 +931,15 @@ class GerenciaService:
                     "$regex": f"^{nombre_cliente}$", "$options": "i"
                 }
 
+            if mes and anio:
+                fecha_inicio = datetime(anio, mes, 1)
+                # Ir al primer día del mes siguiente y restar un segundo
+                if mes == 12:
+                    siguiente_mes = datetime(anio + 1, 1, 1)
+                else:
+                    siguiente_mes = datetime(anio, mes + 1, 1)
+                fecha_fin = siguiente_mes - timedelta(seconds=1)
+
             # Filtro por Rango de Fechas Exacto
             if fecha_inicio or fecha_fin:
                 query["datos_completos.fecha_emision"] = {}
@@ -944,8 +955,13 @@ class GerenciaService:
                 query["$expr"] = query.get("$expr", {"$and": []})
                 query["$expr"]["$and"].append({"$eq": [{"$month": "$datos_completos.fecha_emision"}, mes]})
 
+            print(fecha_inicio,fecha_fin)
             # 2. Obtener Total Vendido Neto (Asegúrate de pasar los nuevos filtros a esta función también)
-            res_valorizado = self.get_total_valorizado(nombre_cliente, fecha_inicio, fecha_fin)
+            res_valorizado = self.get_total_valorizado(
+                nombre_cliente=nombre_cliente, 
+            fecha_inicio=fecha_inicio, 
+            fecha_fin=fecha_fin
+            )
             total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
             # cantidad_fletes = res_valorizado.get("cantidad_fletes", 0) # Asumiendo que tu función ya devuelve este conteo
             
