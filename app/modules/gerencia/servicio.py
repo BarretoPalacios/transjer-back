@@ -62,8 +62,8 @@ class GerenciaService:
                     }
                 
                 return {
-                    "total_general": float(resultado[0]["total_general"]),
-                    "total_fletes": resultado[0]["total_fletes"],
+                    "total_vendido": float(resultado[0]["total_general"]),
+                    "cantidad_fletes": resultado[0]["total_fletes"],
                     "cliente": "TODOS LOS CLIENTES",
                     "estado_calculado": "VALORIZADO",
                     "tipo_consulta": "GENERAL"
@@ -962,7 +962,7 @@ class GerenciaService:
             fecha_inicio=fecha_inicio, 
             fecha_fin=fecha_fin
             )
-            total_vendido_neto = Decimal(str(res_valorizado.get("total_general", 0)))
+            total_vendido_neto = Decimal(str(res_valorizado.get("total_vendido", 0)) )
             # cantidad_fletes = res_valorizado.get("cantidad_fletes", 0) # Asumiendo que tu función ya devuelve este conteo
             
             # CÁLCULO: Vendido Bruto (Neto + 18%)
