@@ -266,6 +266,33 @@ def obtener_estadisticas_fletes():
         logger.error(f"Error al obtener estadísticas de fletes: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
+@router.get("/stats/pendientes-facturacion")
+def obtener_pendientes_por_cliente():
+    """
+    Reporte detallado de montos VALORIZADOS pendientes de facturación
+    agrupados por cada cliente.
+    """
+    try:
+        # 1. Conexión a la base de datos y servicio
+        db = get_database()
+        flete_service = FleteService(db)
+        
+        # 2. Llamada a la función de agregación que creamos
+        reporte = flete_service.get_reporte_pendientes_por_cliente()
+        
+        # 3. Validación opcional por si el reporte viene vacío
+        if not reporte:
+            return []
+            
+        return reporte
+
+    except Exception as e:
+        logger.error(f"Error en endpoint de pendientes por cliente: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error al procesar el reporte de facturación: {str(e)}"
+        )
+
 @router.get("/servicio/{servicio_id}", response_model=List[FleteResponse])
 def listar_fletes_por_servicio(servicio_id: str):
     """

@@ -449,6 +449,67 @@ class FleteService:
             logger.error(f"Error al obtener estadísticas: {str(e)}")
             return {}
 
+    def get_reporte_pendientes_por_cliente(self) -> List[Dict[str, Any]]:
+        """
+        Reporte de montos totalizados por cliente de fletes VALORIZADOS 
+        que aún no han sido facturados.
+        """
+        try:
+            pipeline = [
+                {
+                    # 1. Filtramos fletes VALORIZADOS no asociados a factura
+                    "$match": {
+                        "estado_flete": "VALORIZADO",
+                        "pertenece_a_factura": False
+                    }
+                },
+                {
+                    # 2. Cruce con servicio_principal para obtener datos del cliente
+                    "$lookup": {
+                        "from": "servicio_principal",
+                        "let": {"serv_id": "$servicio_id"},
+                        "pipeline": [
+                            {
+                                "$match": {
+                                    "$expr": {
+                                        # Convertimos a ObjectId para asegurar el match
+                                        "$eq": ["$_id", {"$toObjectId": "$$serv_id"}]
+                                    }
+                                }
+                            }
+                        ],
+                        "as": "info_servicio"
+                    }
+                },
+                {
+                    # 3. Aplanamos el resultado del lookup
+                    "$unwind": "$info_servicio"
+                },
+                {
+                    # 4. Agrupamos por los datos del cliente que están dentro del servicio
+                    "$group": {
+                        "_id": "$info_servicio.cliente.id",
+                        "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
+                        "ruc": {"$first": "$info_servicio.cliente.ruc"},
+                        "monto_total_pendiente": {"$sum": "$monto_flete"},
+                        "cantidad_fletes": {"$sum": 1}
+                    }
+                },
+                {
+                    # 5. Ordenamos por el monto pendiente más alto
+                    "$sort": {"monto_total_pendiente": -1}
+                }
+            ]
+
+            # Ejecutamos el aggregate
+            resultados = list(self.collection.aggregate(pipeline))
+            
+            return resultados
+
+        except Exception as e:
+            logger.error(f"Error al generar reporte de pendientes por cliente: {str(e)}")
+            return []
+
     # def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
     #     """Exportar fletes vinculando datos detallados del servicio asociado"""
     #     try:
