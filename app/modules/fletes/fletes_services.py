@@ -488,7 +488,7 @@ class FleteService:
                 {
                     # 4. Agrupamos por los datos del cliente que están dentro del servicio
                     "$group": {
-                        "_id": "$info_servicio.cliente.id",
+                        # "_id": "$info_servicio.cliente.id",
                         "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
                         # "ruc": {"$first": "$info_servicio.cliente.ruc"},
                         "monto_total_pendiente": {"$sum": "$monto_flete"},
