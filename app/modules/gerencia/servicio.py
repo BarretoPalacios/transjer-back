@@ -4,6 +4,9 @@ from typing import Dict, Any, Optional, List
 from pymongo.collection import Collection
 from math import ceil
 from decimal import Decimal, ROUND_HALF_UP
+import pandas as pd
+from io import BytesIO
+from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
 
@@ -913,6 +916,86 @@ class GerenciaService:
             print(f"Error en agregación financiera: {e}")
             raise
 
+    def export_resumen_financiero_to_excel(
+        self,
+        nombre_cliente: Optional[str] = None,
+        fecha_inicio: Optional[datetime] = None,
+        fecha_fin: Optional[datetime] = None,
+        mes: Optional[int] = None,
+        anio: Optional[int] = None
+    ) -> BytesIO:
+        try:
+            # 1. Obtener los datos de la función original
+            resumen = self.get_resumen_financiero_cliente(
+                nombre_cliente, fecha_inicio, fecha_fin, mes, anio
+            )
+            
+            detalle_clientes = resumen["detalle_por_cliente"]
+            resumen_global = resumen["resumen_general"]
+
+            if not detalle_clientes:
+                # DataFrame vacío con cabeceras si no hay datos
+                df = pd.DataFrame(columns=[
+                    "Cliente", "N° Facturas", "Total Facturado", "Detracción", 
+                    "Neto Total", "Neto Pagado", "Neto Pendiente", 
+                    "Neto Vencido", "Neto por Vencer", "% Morosidad"
+                ])
+            else:
+                excel_data = []
+                for r in detalle_clientes:
+                    excel_data.append({
+                        "Cliente": r["cliente"],
+                        "N° Facturas": r["nro_facturas"],
+                        "Total Facturado": r["facturado"],
+                        "Detracción": r["detraccion"],
+                        "Facturado con Detraccion": r["neto_total"],
+                        "Cobrado": r["neto_pagado"],
+                        "Pendiente": r["neto_pendiente"],
+                        "Vencido": r["neto_vencido"],
+                        "Por Vencer": r["neto_por_vencer"],
+                        # "% Morosidad": f"{r['porcentaje_morosidad']}%"
+                    })
+                
+                # 2. Agregar fila de TOTALES al final para mayor claridad
+                excel_data.append({
+                    "Cliente": "TOTAL GENERAL",
+                    "N° Facturas": sum(r["nro_facturas"] for r in detalle_clientes),
+                    "Total Facturado": resumen_global["gran_total_facturado"],
+                    "Detracción": resumen_global["gran_total_detraccion"],
+                    "Facturado con Detraccion": resumen_global["gran_total_neto"],
+                    "Cobrado": resumen_global["gran_total_neto_pagado"],
+                    "Pendiente": resumen_global["gran_total_neto_pendiente"],
+                    "Vencido": resumen_global["gran_total_neto_vencido"],
+                    "Por Vencer": resumen_global["gran_total_neto_por_vencer"],
+                    # "% Morosidad": "" # No se suma el porcentaje directamente
+                })
+
+                df = pd.DataFrame(excel_data)
+
+            # 3. Proceso de escritura similar a tu ejemplo
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                sheet_name = 'Resumen Financiero'
+                df.to_excel(writer, index=False, sheet_name=sheet_name)
+                
+                worksheet = writer.sheets[sheet_name]
+                
+                # Ajuste automático de columnas
+                for idx, col in enumerate(df.columns):
+                    max_length = max(
+                        df[col].astype(str).apply(len).max(),
+                        len(col)
+                    ) + 2
+                    worksheet.column_dimensions[get_column_letter(idx + 1)].width = min(max_length, 50)
+
+            output.seek(0)
+            return output
+
+        except Exception as e:
+            # Asumiendo que tienes un logger configurado, si no, usa print
+            print(f"Error al exportar resumen financiero: {str(e)}")
+            raise
+
     def get_kpis_financieros_especificos(
             self,
             nombre_cliente: Optional[str] = None,
@@ -1164,3 +1247,126 @@ class GerenciaService:
         except Exception as e:
             logger.error(f"Error al obtener resumen de fletes: {str(e)}")
             raise
+
+    def get_reporte_placas_facturadas_paginado(
+        self, 
+        fecha_inicio: Optional[datetime] = None, 
+        fecha_fin: Optional[datetime] = None,
+        page: int = 1,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Obtiene fletes agrupados por placa que están VALORIZADOS y FACTURADOS,
+        filtrando por el rango de fecha_servicio y con paginación.
+        """
+        try:
+            skip = (page - 1) * limit
+            
+            # 1. Filtro de fechas (se aplica dentro del lookup para optimizar)
+            date_filter = {}
+            if fecha_inicio and fecha_fin:
+                date_filter = {
+                    "fecha_servicio": {
+                        "$gte": fecha_inicio,
+                        "$lte": fecha_fin
+                    }
+                }
+
+            pipeline = [
+                {
+                    # 2. VALIDACIÓN: Solo fletes valorizados y ya facturados
+                    "$match": {
+                        "estado_flete": "VALORIZADO",
+                        "pertenece_a_factura": True
+                    }
+                },
+                {
+                    # 3. Cruce con servicios_principal para obtener placa y fecha_servicio
+                    "$lookup": {
+                        "from": "servicios_principal",
+                        "let": {"serv_id": "$servicio_id"},
+                        "pipeline": [
+                            {
+                                "$match": {
+                                    "$expr": { "$eq": ["$_id", {"$toObjectId": "$$serv_id"}] },
+                                    **date_filter # Filtro por fecha de servicio
+                                }
+                            }
+                        ],
+                        "as": "info_servicio"
+                    }
+                },
+                {
+                    # 4. Elimina fletes que no coinciden con las fechas o no tienen servicio
+                    "$unwind": "$info_servicio"
+                },
+                {
+                    # 5. Agrupación por Placa
+                    "$group": {
+                        "_id": "$info_servicio.flota.placa",
+                        "placa": {"$first": "$info_servicio.flota.placa"},
+                        "vehiculo": {"$first": "$info_servicio.flota.nombre"},
+                        "total_monto": {"$sum": "$monto_flete"},
+                        "cantidad_viajes": {"$sum": 1},
+                        "detalles": {
+                            "$push": {
+                                "codigo_flete": "$codigo_flete",
+                                "codigo_servicio": "$codigo_servicio",
+                                "monto": "$monto_flete",
+                                "codigo_factura": "$codigo_factura",
+                                "fecha_servicio": "$info_servicio.fecha_servicio",
+                                "cliente": "$info_servicio.cliente.nombre"
+                            }
+                        }
+                    }
+                },
+                {
+                    # 6. Orden alfabético por placa
+                    "$sort": {"placa": 1}
+                },
+                {
+                    # 7. FACET: Paginación y Conteo total en una sola consulta
+                    "$facet": {
+                        "metadata": [{"$count": "total"}],
+                        "data": [
+                            {"$skip": skip},
+                            {"$limit": limit}
+                        ]
+                    }
+                },
+                {
+                    # 8. Limpiar el formato de salida del Facet
+                    "$project": {
+                        "total": {"$arrayElemAt": ["$metadata.total", 0]},
+                        "data": 1
+                    }
+                }
+            ]
+
+            # Ejecución
+            result = list(self.collection.aggregate(pipeline))
+            
+            if not result or not result[0]["data"]:
+                return {
+                    "total_placas": 0,
+                    "paginas": 0,
+                    "pagina_actual": page,
+                    "data": []
+                }
+
+            res_final = result[0]
+            total = res_final.get("total", 0)
+
+            return {
+                "total_placas": total,
+                "paginas": (total + limit - 1) // limit,
+                "pagina_actual": page,
+                "limite": limit,
+                "data": res_final["data"]
+            }
+
+        except Exception as e:
+            logger.error(f"Error al generar reporte de placas: {str(e)}")
+            return {"total_placas": 0, "paginas": 0, "pagina_actual": page, "data": []}
+
+

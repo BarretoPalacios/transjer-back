@@ -1,9 +1,10 @@
-from datetime import datetime,timedelta
+from datetime import datetime,timedelta, date
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 import logging
 from app.core.database import get_database
 from app.modules.gerencia.servicio import GerenciaService
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +374,59 @@ def obtener_resumen_financiero_por_cliente(
     except Exception as e:
         logger.error(f"Error al obtener resumen por cliente: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+@router.get("/export/resumen-financiero-excel")
+def exportar_resumen_financiero_excel(
+    nombre_cliente: Optional[str] = Query(None),
+    fecha_inicio: Optional[date] = Query(None),
+    fecha_fin: Optional[date] = Query(None),
+    mes: Optional[int] = Query(None, ge=1, le=12),
+    anio: Optional[int] = Query(None, ge=2000)
+):
+    try:
+        # Validaciones de coherencia de fechas
+        if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La fecha de inicio no puede ser mayor a la fecha fin"
+            )
+
+        # Conversión de date a datetime (si tu lógica de MongoDB requiere datetime)
+        dt_inicio = datetime.combine(fecha_inicio, datetime.min.time()) if fecha_inicio else None
+        dt_fin = datetime.combine(fecha_fin, datetime.max.time()) if fecha_fin else None
+
+        # Instancia de base de datos y servicio
+        db = get_database()
+        # Ajusta el nombre de tu clase de servicio aquí
+        gerencia_service = GerenciaService(db) 
+
+        # Llamada a la nueva función de exportación que creamos anteriormente
+        excel_file = gerencia_service.export_resumen_financiero_to_excel(
+            nombre_cliente=nombre_cliente,
+            fecha_inicio=dt_inicio,
+            fecha_fin=dt_fin,
+            mes=mes,
+            anio=anio
+        )
+
+        # Nombre dinámico del archivo según los filtros
+        filename = f"resumen_financiero_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Asegúrate de tener configurado el logger o cámbialo por un print
+        logger.error(f"Error al exportar resumen financiero: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Error interno al generar el reporte Excel"
+        )
 
 @router.get("/get_kpis_financieros_especificos")
 def get_kpis_financieros_especificos(
