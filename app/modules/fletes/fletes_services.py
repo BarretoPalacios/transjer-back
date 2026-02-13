@@ -450,43 +450,61 @@ class FleteService:
             return {}
 
     def get_reporte_pendientes_por_cliente(self) -> List[Dict[str, Any]]:
+        """
+        Reporte de montos totalizados por cliente consolidando por nombre
+        para evitar duplicados cuando el ID de cliente es nulo.
+        """
         try:
             pipeline = [
                 {
+                    # 1. Filtramos solo fletes valorizados que no están en una factura
                     "$match": {
                         "estado_flete": "VALORIZADO",
                         "pertenece_a_factura": False
                     }
                 },
                 {
+                    # 2. Cruce con la colección de servicios
                     "$lookup": {
                         "from": "servicio_principal",
                         "let": {"serv_id": "$servicio_id"},
                         "pipeline": [
                             {
                                 "$match": {
-                                    "$expr": { "$eq": ["$_id", {"$toObjectId": "$$serv_id"}] }
+                                    "$expr": {
+                                        # Comparamos convirtiendo el string de fletes a ObjectId
+                                        "$eq": ["$_id", {"$toObjectId": "$$serv_id"}]
+                                    }
                                 }
                             }
                         ],
                         "as": "info_servicio"
                     }
                 },
-                { "$unwind": "$info_servicio" },
                 {
+                    # 3. Aplanamos el array devuelto por el lookup
+                    "$unwind": "$info_servicio"
+                },
+                {
+                    # 4. AGRUPACIÓN CONSOLIDADA POR NOMBRE
                     "$group": {
-                        "_id": "$info_servicio.cliente.id",
+                        # Agrupamos por nombre para evitar que IDs nulos separen al mismo cliente
+                        "_id": "$info_servicio.cliente.nombre", 
                         "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
+                        "cliente_id": {"$first": "$info_servicio.cliente.id"},
                         "monto_total_pendiente": {"$sum": "$monto_flete"},
                         "cantidad_fletes": {"$sum": 1}
                     }
                 },
-                { "$sort": {"monto_total_pendiente": -1} },
-                # --- NUEVO PASO: PROYECCIÓN ---
                 {
+                    # 5. Ordenamos de mayor a menor deuda
+                    "$sort": {"monto_total_pendiente": -1}
+                },
+                {
+                    # 6. Limpiamos la salida para el frontend
                     "$project": {
-                        "_id": 0, # Esto elimina el campo _id del resultado
-                        "cliente_id": "$_id", # Opcional: si quieres el ID pero con otro nombre
+                        "_id": 0,
+                        "cliente_id": 1,
                         "nombre_cliente": 1,
                         "monto_total_pendiente": 1,
                         "cantidad_fletes": 1
@@ -494,10 +512,12 @@ class FleteService:
                 }
             ]
 
-            return list(self.collection.aggregate(pipeline))
+            # Ejecutamos la agregación y convertimos el cursor a lista
+            resultados = list(self.collection.aggregate(pipeline))
+            return resultados
 
         except Exception as e:
-            logger.error(f"Error al generar reporte: {str(e)}")
+            logger.error(f"Error al generar reporte consolidado: {str(e)}")
             return []
 
     # def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
