@@ -490,7 +490,7 @@ class FleteService:
                     "$group": {
                         "_id": "$info_servicio.cliente.id",
                         "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
-                        "ruc": {"$first": "$info_servicio.cliente.ruc"},
+                        # "ruc": {"$first": "$info_servicio.cliente.ruc"},
                         "monto_total_pendiente": {"$sum": "$monto_flete"},
                         "cantidad_fletes": {"$sum": 1}
                     }
