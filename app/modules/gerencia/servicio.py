@@ -1281,9 +1281,9 @@ class GerenciaService:
                     }
                 },
                 {
-                    # 3. Cruce con servicios_principal para obtener placa y fecha_servicio
+                    # 3. Cruce con servicio_principal para obtener placa y fecha_servicio
                     "$lookup": {
-                        "from": "servicios_principal",
+                        "from": "servicio_principal",
                         "let": {"serv_id": "$servicio_id"},
                         "pipeline": [
                             {

@@ -454,3 +454,35 @@ nombre_cliente: Optional[str] = None,
     except Exception as e:
         logger.error(f"Error al obtener KPIs completos: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+
+@router.get("/reporte-placas-facturadas")
+def obtener_reporte_placas_facturadas(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+):
+    try:
+        
+
+        dt_inicio = None
+        dt_fin = None
+        
+        if fecha_inicio and fecha_fin:
+            try:
+                dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+                dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Formato YYYY-MM-DD requerido")
+
+        return gerencia_service.get_reporte_placas_facturadas_paginado(
+            fecha_inicio=dt_inicio,
+            fecha_fin=dt_fin,
+            page=page,
+            limit=limit
+        )
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

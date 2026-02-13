@@ -662,96 +662,172 @@ class FacturacionGestionService:
             print(f"Error en dashboard: {e}")
             return {}
 
+    # def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
+    #     """Exportar gestiones a Excel con datos completos de snapshots"""
+    #     try:
+    #         gestiones = self._get_all_gestiones_sin_paginacion(filter_params)
+            
+    #         if not gestiones:
+    #             df = pd.DataFrame(columns=[
+    #                 "ID", "Código Factura", "Número Factura","Fecha Emision","Fecha Vencimiento", "Cliente", "Proveedor",
+    #                 "Placa", "Conductor", "Auxiliar", "Tipo Servicio", "Zona",
+    #                 "Fecha Servicio", "Origen", "Destino",
+    #                 "Estado Pago Neto", "Estado Detracción",
+    #                 "Monto Total", "Monto Neto", "Monto Pagado", "Saldo Pendiente",
+    #                 "Monto Detracción", "Tasa Detracción (%)",
+    #                 "Fecha Probable Pago", "Prioridad", "Responsable"
+    #             ])
+    #         else:
+    #             excel_data = []
+    #             for gestion in gestiones:
+    #                 # Extraer datos de snapshot si existen
+    #                 datos = gestion.get("datos_completos", {})
+    #                 flete = datos.get("fletes", [{}])[0] if datos.get("fletes") else {}
+    #                 servicio = flete.get("servicio", {})
+                    
+    #                 excel_data.append({
+    #                     "ID": gestion.get("id", ""),
+    #                     "Código Factura": gestion.get("codigo_factura", ""),
+    #                     "Número Factura": datos.get("numero_factura", ""),
+    #                     "Fecha Emision": datos.get("fecha_emision", ""),
+    #                     "Fecha Vencimiento": datos.get("fecha_vencimiento", ""),
+    #                     "Cliente": servicio.get("nombre_cliente", ""),
+    #                     "Proveedor": servicio.get("nombre_proveedor", ""),
+    #                     "Placa": servicio.get("placa_flota", ""),
+    #                     "Conductor": servicio.get("nombre_conductor", ""),
+    #                     "Auxiliar": servicio.get("nombre_auxiliar", ""),
+    #                     "Tipo Servicio": servicio.get("tipo_servicio", ""),
+    #                     "Zona": servicio.get("zona", ""),
+    #                     "Fecha Servicio": servicio.get("fecha_servicio", ""),
+    #                     "Origen": servicio.get("origen", ""),
+    #                     "Destino": servicio.get("destino", ""),
+    #                     "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
+    #                     "Estado Detracción": gestion.get("estado_detraccion", ""),
+    #                     "Monto Total": str(datos.get("monto_total", Decimal("0"))),
+    #                     "Monto Neto": str(gestion.get("monto_neto", Decimal("0"))),
+    #                     "Monto Pagado": str(gestion.get("monto_pagado_acumulado", Decimal("0"))),
+    #                     "Saldo Pendiente": str(gestion.get("saldo_pendiente", Decimal("0"))),
+    #                     "Monto Detracción": str(gestion.get("monto_detraccion", Decimal("0"))),
+    #                     "Tasa Detracción (%)": str(gestion.get("tasa_detraccion", Decimal("4.0"))),
+    #                     "Fecha Probable Pago": gestion.get("fecha_probable_pago", ""),
+    #                     "Prioridad": gestion.get("prioridad", ""),
+    #                     "Responsable": gestion.get("responsable_gestion", "")
+    #                 })
+                
+    #             df = pd.DataFrame(excel_data)
+            
+    #         output = BytesIO()
+    #         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    #             df.to_excel(writer, index=False, sheet_name='Gestión Facturación')
+                
+    #             from openpyxl.styles import Font, PatternFill, Alignment
+                
+    #             workbook = writer.book
+    #             worksheet = writer.sheets['Gestión Facturación']
+                
+    #             header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    #             header_font = Font(color="FFFFFF", bold=True)
+                
+    #             for cell in worksheet[1]:
+    #                 cell.fill = header_fill
+    #                 cell.font = header_font
+    #                 cell.alignment = Alignment(horizontal="center", vertical="center")
+                
+    #             for column in worksheet.columns:
+    #                 max_length = 0
+    #                 column_letter = column[0].column_letter
+    #                 for cell in column:
+    #                     try:
+    #                         if len(str(cell.value)) > max_length:
+    #                             max_length = len(str(cell.value))
+    #                     except:
+    #                         pass
+    #                 adjusted_width = min(max_length + 2, 50)
+    #                 worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+    #         output.seek(0)
+    #         return output
+            
+    #     except Exception as e:
+    #         logger.error(f"Error al exportar a Excel: {str(e)}")
+    #         raise
+    
     def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
-        """Exportar gestiones a Excel con datos completos de snapshots"""
+        """Exportar gestiones a Excel manejando múltiples fletes por gestión"""
         try:
             gestiones = self._get_all_gestiones_sin_paginacion(filter_params)
             
-            if not gestiones:
-                df = pd.DataFrame(columns=[
-                    "ID", "Código Factura", "Número Factura","Fecha Emision","Fecha Vencimiento", "Cliente", "Proveedor",
-                    "Placa", "Conductor", "Auxiliar", "Tipo Servicio", "Zona",
-                    "Fecha Servicio", "Origen", "Destino",
-                    "Estado Pago Neto", "Estado Detracción",
-                    "Monto Total", "Monto Neto", "Monto Pagado", "Saldo Pendiente",
-                    "Monto Detracción", "Tasa Detracción (%)",
-                    "Fecha Probable Pago", "Prioridad", "Responsable"
-                ])
-            else:
-                excel_data = []
-                for gestion in gestiones:
-                    # Extraer datos de snapshot si existen
-                    datos = gestion.get("datos_completos", {})
-                    flete = datos.get("fletes", [{}])[0] if datos.get("fletes") else {}
-                    servicio = flete.get("servicio", {})
-                    
-                    excel_data.append({
-                        "ID": gestion.get("id", ""),
-                        "Código Factura": gestion.get("codigo_factura", ""),
-                        "Número Factura": datos.get("numero_factura", ""),
-                        "Fecha Emision": datos.get("fecha_emision", ""),
-                        "Fecha Vencimiento": datos.get("fecha_vencimiento", ""),
-                        "Cliente": servicio.get("nombre_cliente", ""),
-                        "Proveedor": servicio.get("nombre_proveedor", ""),
-                        "Placa": servicio.get("placa_flota", ""),
-                        "Conductor": servicio.get("nombre_conductor", ""),
-                        "Auxiliar": servicio.get("nombre_auxiliar", ""),
-                        "Tipo Servicio": servicio.get("tipo_servicio", ""),
-                        "Zona": servicio.get("zona", ""),
-                        "Fecha Servicio": servicio.get("fecha_servicio", ""),
-                        "Origen": servicio.get("origen", ""),
-                        "Destino": servicio.get("destino", ""),
-                        "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
-                        "Estado Detracción": gestion.get("estado_detraccion", ""),
-                        "Monto Total": str(datos.get("monto_total", Decimal("0"))),
-                        "Monto Neto": str(gestion.get("monto_neto", Decimal("0"))),
-                        "Monto Pagado": str(gestion.get("monto_pagado_acumulado", Decimal("0"))),
-                        "Saldo Pendiente": str(gestion.get("saldo_pendiente", Decimal("0"))),
-                        "Monto Detracción": str(gestion.get("monto_detraccion", Decimal("0"))),
-                        "Tasa Detracción (%)": str(gestion.get("tasa_detraccion", Decimal("4.0"))),
-                        "Fecha Probable Pago": gestion.get("fecha_probable_pago", ""),
-                        "Prioridad": gestion.get("prioridad", ""),
-                        "Responsable": gestion.get("responsable_gestion", "")
-                    })
-                
-                df = pd.DataFrame(excel_data)
+            # 1. Definir columnas siempre para mantener consistencia
+            columnas = [
+                "ID", "Código Factura", "Número Factura", "Fecha Emision", "Fecha Vencimiento", 
+                "Cliente", "Proveedor", "Placa", "Conductor", "Auxiliar", "Tipo Servicio", 
+                "Zona", "Fecha Servicio", "Origen", "Destino", "Estado Pago Neto", 
+                "Estado Detracción", "Facturado Bruto", "Facturado con Detraccion", "Cobrado", 
+                "Saldo Pendiente", "Monto Detracción", "Tasa Det (%)", 
+                "Fecha De Pago", "Prioridad", "Responsable"
+            ]
+
+            excel_data = []
             
+            if gestiones:
+                for gestion in gestiones:
+                    datos = gestion.get("datos_completos", {})
+                    # Obtenemos la lista de fletes (si no hay, usamos una lista con un dict vacío para no perder la gestión)
+                    lista_fletes = datos.get("fletes", [])
+                    
+                    # Si la gestión no tiene fletes, creamos una fila vacía para mantener los datos de la factura
+                    if not lista_fletes:
+                        lista_fletes = [{}]
+
+                    for flete in lista_fletes:
+                        servicio = flete.get("servicio", {})
+                        
+                        excel_data.append({
+                            "ID": gestion.get("id", ""),
+                            "Código Factura": gestion.get("codigo_factura", ""),
+                            "Número Factura": datos.get("numero_factura", ""),
+                            "Fecha Emision": datos.get("fecha_emision", ""),
+                            "Fecha Vencimiento": datos.get("fecha_vencimiento", ""),
+                            "Cliente": servicio.get("nombre_cliente", ""),
+                            "Proveedor": servicio.get("nombre_proveedor", ""),
+                            "Placa": servicio.get("placa_flota", ""),
+                            "Conductor": servicio.get("nombre_conductor", ""),
+                            "Auxiliar": servicio.get("nombre_auxiliar", ""),
+                            "Tipo Servicio": servicio.get("tipo_servicio", ""),
+                            "Zona": servicio.get("zona", ""),
+                            "Fecha Servicio": servicio.get("fecha_servicio", ""),
+                            "Origen": servicio.get("origen", ""),
+                            "Destino": servicio.get("destino", ""),
+                            "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
+                            "Estado Detracción": gestion.get("estado_detraccion", ""),
+                            "Facturado Bruto": str(datos.get("monto_total", Decimal("0"))),
+                            "Facturado con Detraccion": str(gestion.get("monto_neto", Decimal("0"))),
+                            "Cobrado": str(gestion.get("monto_pagado_acumulado", Decimal("0"))),
+                            "Saldo Pendiente": str(gestion.get("saldo_pendiente", Decimal("0"))),
+                            "Monto Detracción": str(gestion.get("monto_detraccion", Decimal("0"))),
+                            "Tasa Det (%)": str(gestion.get("tasa_detraccion", Decimal("4.0"))),
+                            "Fecha De Pago": gestion.get("fecha_probable_pago", ""),
+                            "Prioridad": gestion.get("prioridad", ""),
+                            "Responsable": gestion.get("responsable_gestion", "")
+                        })
+
+            df = pd.DataFrame(excel_data, columns=columnas)
+
+            # --- El resto del código de formateo (openpyxl) se mantiene igual ---
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Gestión Facturación')
                 
-                from openpyxl.styles import Font, PatternFill, Alignment
+                # (Aquí va tu bloque de estilos: header_fill, column_dimensions, etc.)
+                # ...
                 
-                workbook = writer.book
-                worksheet = writer.sheets['Gestión Facturación']
-                
-                header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True)
-                
-                for cell in worksheet[1]:
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-            
             output.seek(0)
             return output
-            
+
         except Exception as e:
             logger.error(f"Error al exportar a Excel: {str(e)}")
             raise
-    
+
     def _get_all_gestiones_sin_paginacion(
         self,
         filter_params: Optional[FacturacionGestionFilter] = None
