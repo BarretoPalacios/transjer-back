@@ -16,8 +16,103 @@ class GerenciaService:
         self.fletes_collection = db["fletes"]
         self.servicio_principal_collection = db["servicio_principal"]
         self.collection = db["facturacion_gestion"]  # Colección de gestiones
-        self.facturas_collection = db["facturacion"]  # Colección de facturas
+        self.facturas_collection = db["facturacion"]  # Colección de facturas   
+
     
+
+    def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
+        try:
+            pipeline = []
+
+            # 1. Filtro de fecha SOLO SI se proporcionan ambos
+            if mes is not None and anio is not None:
+                mes = int(mes)
+                anio = int(anio)
+                
+                fecha_inicio = datetime(anio, mes, 1, 0, 0, 0)
+                if mes == 12:
+                    fecha_fin = datetime(anio + 1, 1, 1, 0, 0, 0)
+                else:
+                    fecha_fin = datetime(anio, mes + 1, 1, 0, 0, 0)
+
+                pipeline.append({
+                    "$match": {
+                        "fecha_creacion": {
+                            "$gte": fecha_inicio,
+                            "$lt": fecha_fin
+                        }
+                    }
+                })
+
+            # 2. Agrupación (Esta corre siempre, sea filtrado o total histórico)
+            pipeline.append({
+                "$group": {
+                    "_id": None,
+                    "conteo_total": {"$sum": 1},
+                    "monto_pendiente": {
+                        "$sum": {
+                            "$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]
+                        }
+                    },
+                    "monto_val_sin_fac": {
+                        "$sum": {
+                            "$cond": [
+                                {"$and": [
+                                    {"$eq": ["$estado_flete", "VALORIZADO"]},
+                                    {"$eq": ["$pertenece_a_factura", False]}
+                                ]},
+                                {"$toDouble": "$monto_flete"}, 0
+                            ]
+                        }
+                    },
+                    "monto_val_con_fac": {
+                        "$sum": {
+                            "$cond": [
+                                {"$and": [
+                                    {"$eq": ["$estado_flete", "VALORIZADO"]},
+                                    {"$eq": ["$pertenece_a_factura", True]}
+                                ]},
+                                {"$toDouble": "$monto_flete"}, 0
+                            ]
+                        }
+                    }
+                }
+            })
+
+            # 3. Proyección para formatear resultados
+            pipeline.append({
+                "$project": {
+                    "_id": 0,
+                    "conteo_total": 1,
+                    "monto_pendiente": {"$round": ["$monto_pendiente", 2]},
+                    "monto_val_sin_factura": {"$round": ["$monto_val_sin_fac", 2]},
+                    "monto_val_con_factura": {"$round": ["$monto_val_con_fac", 2]},
+                    "venta_total": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
+                }
+            })
+
+            resultado = list(self.fletes_collection.aggregate(pipeline))
+
+            if not resultado:
+                return {
+                    "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+                    "conteo_total": 0,
+                    "monto_pendiente": 0.0,
+                    "monto_val_sin_factura": 0.0,
+                    "monto_val_con_factura": 0.0,
+                    "venta_total": 0.0
+                }
+
+            final_res = resultado[0]
+            final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
+            return final_res
+
+        except Exception as e:
+            print(f"Error: {e}")
+            return {"error": str(e)}
+
+
+
     def get_total_valorizado(
         self,
         nombre_cliente: Optional[str] = None,

@@ -431,7 +431,7 @@ def exportar_resumen_financiero_excel(
 @router.get("/get_kpis_financieros_especificos")
 def get_kpis_financieros_especificos(
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
-nombre_cliente: Optional[str] = None,
+    nombre_cliente: Optional[str] = None,
         fecha_inicio: Optional[datetime] = None,
         fecha_fin: Optional[datetime] = None,
         mes: Optional[int] = None,
@@ -482,6 +482,31 @@ def obtener_reporte_placas_facturadas(
             fecha_fin=dt_fin,
             page=page,
             limit=limit
+        )
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+
+
+
+
+
+
+
+@router.get("/total-fletes")
+def obtener_reporte_placas_facturadas(
+    mes: Optional[int] = Query(None),
+    anio: Optional[int] = Query(None),
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+):
+    try:
+        return gerencia_service.analisis_de_fletes(
+            mes, anio
         )
     except Exception as e:
         logger.error(f"Error: {str(e)}")
