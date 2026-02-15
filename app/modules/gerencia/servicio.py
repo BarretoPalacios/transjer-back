@@ -230,7 +230,7 @@ class GerenciaService:
                 {"$sort": {"repeticiones": -1}}
             ]
 
-            duplicados = list(self.facturas_collection.aggregate(pipeline))
+            duplicados = list(self.collection.aggregate(pipeline))
 
             # Calculamos el impacto total del error
             exceso_total = sum(d["monto_inflado_total"] - d["monto_factura"] for d in duplicados)
