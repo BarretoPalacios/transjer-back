@@ -117,50 +117,51 @@ class GerenciaService:
         Excluye facturas Anuladas y permite filtrado opcional por periodo.
         """
         try:
+            
             pipeline = []
+            
+            # 1. Filtro inicial: Omitir Anulados
+            match_filters = {"estado_pago_neto": {"$ne": "Anulado"}}
 
-            # 1. Filtros base: Omitir Anulados
-            match_filters = {
-                "estado_pago_neto": {"$ne": "Anulado"}
-            }
-
-            # 2. Filtro de fecha (si se proporciona mes y año)
-            if mes is not None and anio is not None:
-                mes = int(mes)
-                anio = int(anio)
-                fecha_inicio = datetime(anio, mes, 1)
-                fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
-                
-                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = {
-                    "$gte": fecha_inicio,
-                    "$lt": fecha_fin
-                }
+            # 2. Filtro de fecha (Si se pide un mes)
+            if mes and anio:
+                inicio = datetime(anio, mes, 1)
+                fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = {"$gte": inicio, "$lt": fin}
 
             pipeline.append({"$match": match_filters})
 
-            # 3. Agrupación de todos los indicadores financieros
+            # --- EL PASO CLAVE ---
+            # 3. Agrupamos por el ID de la factura para eliminar duplicados de fletes
             pipeline.append({
                 "$group": {
-                    "_id": "$_id",
-                    "conteo_facturas": {"$sum": 1},
-                    # Sumamos el monto_total que está dentro de datos_completos
-                    "suma_monto_total": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-                    "suma_monto_neto": {"$sum": {"$toDouble": "$monto_neto"}},
-                    "suma_monto_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
+                    "_id": "$_id", # Agrupamos por el documento único
+                    "monto_total": {"$first": {"$toDouble": "$datos_completos.monto_total"}},
+                    "monto_neto": {"$first": {"$toDouble": "$monto_neto"}},
+                    "monto_pagado": {"$first": {"$toDouble": "$monto_pagado_acumulado"}}
                 }
             })
 
-            # 4. Proyección final con cálculos y redondeo
+            # 4. Ahora sí, sumamos los totales únicos
+            pipeline.append({
+                "$group": {
+                    "_id": None,
+                    "conteo_facturas": {"$sum": 1},
+                    "total_bruto": {"$sum": "$monto_total"},
+                    "total_neto": {"$sum": "$monto_neto"},
+                    "total_pagado": {"$sum": "$monto_pagado"}
+                }
+            })
+
+            # 5. Proyección final
             pipeline.append({
                 "$project": {
                     "_id": 0,
                     "conteo_facturas": 1,
-                    "monto_total_bruto": {"$round": ["$suma_monto_total", 2]},
-                    "monto_neto_total": {"$round": ["$suma_monto_neto", 2]},
-                    "monto_pagado_acumulado": {"$round": ["$suma_monto_pagado", 2]},
-                    "monto_pendiente_cobro": {
-                        "$round": [{"$subtract": ["$suma_monto_neto", "$suma_monto_pagado"]}, 2]
-                    }
+                    "monto_total_bruto": {"$round": ["$total_bruto", 2]},
+                    "monto_neto_total": {"$round": ["$total_neto", 2]},
+                    "monto_pagado_acumulado": {"$round": ["$total_pagado", 2]},
+                    "monto_pendiente_cobro": {"$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]}
                 }
             })
 
