@@ -499,13 +499,28 @@ def obtener_reporte_placas_facturadas(
 
 
 @router.get("/total-fletes")
-def obtener_reporte_placas_facturadas(
+def analisis_de_fletes(
     mes: Optional[int] = Query(None),
     anio: Optional[int] = Query(None),
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
 ):
     try:
         return gerencia_service.analisis_de_fletes(
+            mes, anio
+        )
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/total-facturas")
+def analisis_de_facturas(
+    mes: Optional[int] = Query(None),
+    anio: Optional[int] = Query(None),
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+):
+    try:
+        return gerencia_service.analisis_de_facturas(
             mes, anio
         )
     except Exception as e:

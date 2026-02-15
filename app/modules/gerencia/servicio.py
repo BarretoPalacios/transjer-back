@@ -111,7 +111,79 @@ class GerenciaService:
             print(f"Error: {e}")
             return {"error": str(e)}
 
+    def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Analiza montos totales, netos, pagados y pendientes.
+        Excluye facturas Anuladas y permite filtrado opcional por periodo.
+        """
+        try:
+            pipeline = []
 
+            # 1. Filtros base: Omitir Anulados
+            match_filters = {
+                "estado_pago_neto": {"$ne": "Anulado"}
+            }
+
+            # 2. Filtro de fecha (si se proporciona mes y año)
+            if mes is not None and anio is not None:
+                mes = int(mes)
+                anio = int(anio)
+                fecha_inicio = datetime(anio, mes, 1)
+                fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+                
+                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = {
+                    "$gte": fecha_inicio,
+                    "$lt": fecha_fin
+                }
+
+            pipeline.append({"$match": match_filters})
+
+            # 3. Agrupación de todos los indicadores financieros
+            pipeline.append({
+                "$group": {
+                    "_id": None,
+                    "conteo_facturas": {"$sum": 1},
+                    # Sumamos el monto_total que está dentro de datos_completos
+                    "suma_monto_total": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                    "suma_monto_neto": {"$sum": {"$toDouble": "$monto_neto"}},
+                    "suma_monto_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
+                }
+            })
+
+            # 4. Proyección final con cálculos y redondeo
+            pipeline.append({
+                "$project": {
+                    "_id": 0,
+                    "conteo_facturas": 1,
+                    "monto_total_bruto": {"$round": ["$suma_monto_total", 2]},
+                    "monto_neto_total": {"$round": ["$suma_monto_neto", 2]},
+                    "monto_pagado_acumulado": {"$round": ["$suma_monto_pagado", 2]},
+                    "monto_pendiente_cobro": {
+                        "$round": [{"$subtract": ["$suma_monto_neto", "$suma_monto_pagado"]}, 2]
+                    }
+                }
+            })
+
+            resultado = list(self.collection.aggregate(pipeline))
+
+            if not resultado:
+                return {
+                    "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+                    "conteo_facturas": 0,
+                    "monto_total_bruto": 0.0,
+                    "monto_neto_total": 0.0,
+                    "monto_pagado_acumulado": 0.0,
+                    "monto_pendiente_cobro": 0.0
+                }
+
+            final_res = resultado[0]
+            final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
+            
+            return final_res
+
+        except Exception as e:
+            print(f"Error en análisis financiero: {e}")
+            return {"error": str(e)}
 
     def get_total_valorizado(
         self,
