@@ -526,3 +526,19 @@ def analisis_de_facturas(
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+        
+
+@router.get("/auditoria_duplicados_unwind")
+def auditoria_duplicados_unwind(
+    mes: Optional[int] = Query(None),
+    anio: Optional[int] = Query(None),
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+):
+    try:
+        return gerencia_service.auditoria_duplicados_unwind(
+            mes, anio
+        )
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))  

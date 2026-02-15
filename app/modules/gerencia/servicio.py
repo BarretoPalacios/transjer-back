@@ -117,7 +117,7 @@ class GerenciaService:
         Excluye facturas Anuladas y permite filtrado opcional por periodo.
         """
         try:
-            
+
             pipeline = []
             
             # 1. Filtro inicial: Omitir Anulados
@@ -185,6 +185,68 @@ class GerenciaService:
         except Exception as e:
             print(f"Error en análisis financiero: {e}")
             return {"error": str(e)}
+
+
+    def auditoria_duplicados_unwind(self, mes: int, anio: int) -> Dict[str, Any]:
+        """
+        Usa $unwind para identificar qué facturas tienen múltiples fletes
+        y cuánto están 'aportando' extra al total debido a la duplicación.
+        """
+        try:
+            inicio = datetime(anio, mes, 1)
+            fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+
+            pipeline = [
+                # 1. Filtramos las que no están anuladas
+                {"$match": {"estado_pago_neto": {"$ne": "Anulado"}}},
+                
+                # 2. Desglosamos los fletes (Aquí ocurre la duplicación)
+                {"$unwind": "$datos_completos.fletes"},
+                
+                # 3. Filtramos por la fecha de cada flete individual
+                {
+                    "$match": {
+                        "datos_completos.fletes.servicio.fecha_servicio": {
+                            "$gte": inicio,
+                            "$lt": fin
+                        }
+                    }
+                },
+                
+                # 4. Agrupamos por código de factura para contar cuántas veces aparece
+                {
+                    "$group": {
+                        "_id": "$codigo_factura",
+                        "repeticiones": {"$sum": 1},
+                        "monto_factura": {"$first": {"$toDouble": "$monto_neto"}},
+                        "monto_inflado_total": {"$sum": {"$toDouble": "$monto_neto"}}
+                    }
+                },
+                
+                # 5. Filtramos solo las que aparecen más de una vez
+                {"$match": {"repeticiones": {"$gt": 1}}},
+                
+                # 6. Ordenamos por las más repetidas
+                {"$sort": {"repeticiones": -1}}
+            ]
+
+            duplicados = list(self.facturas_collection.aggregate(pipeline))
+
+            # Calculamos el impacto total del error
+            exceso_total = sum(d["monto_inflado_total"] - d["monto_factura"] for d in duplicados)
+
+            return {
+                "periodo": f"{mes}/{anio}",
+                "total_facturas_duplicadas": len(duplicados),
+                "exceso_de_monto_por_duplicidad": round(exceso_total, 2),
+                "detalle_facturas": duplicados
+            }
+
+        except Exception as e:
+            print(f"Error en auditoría: {e}")
+            return {"error": str(e)}
+
+
 
     def get_total_valorizado(
         self,
