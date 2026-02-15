@@ -141,7 +141,7 @@ class GerenciaService:
             # 3. Agrupación de todos los indicadores financieros
             pipeline.append({
                 "$group": {
-                    "_id": None,
+                    "_id": "$_id",
                     "conteo_facturas": {"$sum": 1},
                     # Sumamos el monto_total que está dentro de datos_completos
                     "suma_monto_total": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
