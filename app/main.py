@@ -102,6 +102,13 @@ async def lifespan(app: FastAPI):
         
         scheduler = BackgroundScheduler()
         
+        try:
+            logger.info("🔄 Ejecutando actualización inicial de vencimientos (Post-Startup)...")
+            
+            gestion_service._actualizar_vencimientos_automaticos() 
+            logger.info("✅ Actualización inicial completada.")
+        except Exception as e:
+            logger.error(f"❌ Error en la actualización inicial: {e}")
         # Programamos la tarea: Se ejecuta todos los días a las 00:01 AM
         # También puedes usar (minutes=60) para pruebas
         scheduler.add_job(
