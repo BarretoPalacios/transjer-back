@@ -117,43 +117,47 @@ class GerenciaService:
         Excluye facturas Anuladas y permite filtrado opcional por periodo.
         """
         try:
-
             pipeline = []
-            
-            # 1. Filtro inicial: Omitir Anulados
+
+            # 1. Filtro base: Omitir Anulados
             match_filters = {"estado_pago_neto": {"$ne": "Anulado"}}
-
-            # 2. Filtro de fecha (Si se pide un mes)
-            if mes and anio:
-                inicio = datetime(anio, mes, 1)
-                fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
-                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = {"$gte": inicio, "$lt": fin}
-
             pipeline.append({"$match": match_filters})
 
-            # --- EL PASO CLAVE ---
-            # 3. Agrupamos por el ID de la factura para eliminar duplicados de fletes
+            # 2. Paso clave: Extraer la fecha del PRIMER flete para clasificar
+            # Esto evita duplicados si la factura tiene muchos fletes
             pipeline.append({
-                "$group": {
-                    "_id": "$_id", # Agrupamos por el documento único
-                    "monto_total": {"$first": {"$toDouble": "$datos_completos.monto_total"}},
-                    "monto_neto": {"$first": {"$toDouble": "$monto_neto"}},
-                    "monto_pagado": {"$first": {"$toDouble": "$monto_pagado_acumulado"}}
+                "$addFields": {
+                    "fecha_referencia": { 
+                        "$arrayElemAt": ["$datos_completos.fletes.servicio.fecha_servicio", 0] 
+                    }
                 }
             })
 
-            # 4. Ahora sí, sumamos los totales únicos
+            # 3. Filtro por fecha (solo si se pide mes y año)
+            if mes is not None and anio is not None:
+                mes = int(mes)
+                anio = int(anio)
+                fecha_inicio = datetime(anio, mes, 1)
+                fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+                
+                pipeline.append({
+                    "$match": {
+                        "fecha_referencia": { "$gte": fecha_inicio, "$lt": fecha_fin }
+                    }
+                })
+
+            # 4. Agrupación final (ya no habrá duplicados)
             pipeline.append({
                 "$group": {
                     "_id": None,
                     "conteo_facturas": {"$sum": 1},
-                    "total_bruto": {"$sum": "$monto_total"},
-                    "total_neto": {"$sum": "$monto_neto"},
-                    "total_pagado": {"$sum": "$monto_pagado"}
+                    "total_bruto": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+                    "total_neto": {"$sum": {"$toDouble": "$monto_neto"}},
+                    "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
                 }
             })
 
-            # 5. Proyección final
+            # 5. Formateo y Redondeo
             pipeline.append({
                 "$project": {
                     "_id": 0,
@@ -161,7 +165,9 @@ class GerenciaService:
                     "monto_total_bruto": {"$round": ["$total_bruto", 2]},
                     "monto_neto_total": {"$round": ["$total_neto", 2]},
                     "monto_pagado_acumulado": {"$round": ["$total_pagado", 2]},
-                    "monto_pendiente_cobro": {"$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]}
+                    "monto_pendiente_cobro": {
+                        "$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]
+                    }
                 }
             })
 
@@ -177,13 +183,12 @@ class GerenciaService:
                     "monto_pendiente_cobro": 0.0
                 }
 
-            final_res = resultado[0]
-            final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
-            
-            return final_res
+            res = resultado[0]
+            res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
+            return res
 
         except Exception as e:
-            print(f"Error en análisis financiero: {e}")
+            print(f"Error: {e}")
             return {"error": str(e)}
 
 
