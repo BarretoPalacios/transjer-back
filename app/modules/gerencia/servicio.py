@@ -105,77 +105,170 @@ class GerenciaService:
         except Exception as e:
             return {"error": str(e)}
 
+    # def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
+    #     """
+    #     Analiza montos totales, netos, pagados y pendientes.
+    #     Excluye facturas Anuladas y permite filtrado opcional por periodo.
+    #     """
+    #     try:
+    #         pipeline = []
+
+    #         # 1. Filtro base: Omitir Anulados
+    #         match_filters = {"estado_pago_neto": {"$ne": "Anulado"}}
+    #         pipeline.append({"$match": match_filters})
+
+    #         # 2. Paso clave: Extraer la fecha del PRIMER flete para clasificar
+    #         # Esto evita duplicados si la factura tiene muchos fletes
+    #         pipeline.append({
+    #             "$addFields": {
+    #                 "fecha_referencia": { 
+    #                     "$arrayElemAt": ["$datos_completos.fletes.servicio.fecha_servicio", 0] 
+    #                 }
+    #             }
+    #         })
+
+    #         # 3. Filtro por fecha (solo si se pide mes y año)
+    #         if mes is not None and anio is not None:
+    #             mes = int(mes)
+    #             anio = int(anio)
+    #             fecha_inicio = datetime(anio, mes, 1)
+    #             fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+                
+    #             pipeline.append({
+    #                 "$match": {
+    #                     "fecha_referencia": { "$gte": fecha_inicio, "$lt": fecha_fin }
+    #                 }
+    #             })
+
+    #         # 4. Agrupación final (ya no habrá duplicados)
+    #         pipeline.append({
+    #             "$group": {
+    #                 "_id": None,
+    #                 "conteo_facturas": {"$sum": 1},
+    #                 "total_bruto": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
+    #                 "total_neto": {"$sum": {"$toDouble": "$monto_neto"}},
+    #                 "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
+    #             }
+    #         })
+
+    #         # 5. Formateo y Redondeo
+    #         pipeline.append({
+    #             "$project": {
+    #                 "_id": 0,
+    #                 "conteo_facturas": 1,
+    #                 "monto_total_bruto": {"$round": ["$total_bruto", 2]},
+    #                 "monto_neto_total": {"$round": ["$total_neto", 2]},
+    #                 "monto_pagado_acumulado": {"$round": ["$total_pagado", 2]},
+    #                 "monto_pendiente_cobro": {
+    #                     "$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]
+    #                 }
+    #             }
+    #         })
+
+    #         resultado = list(self.collection.aggregate(pipeline))
+
+    #         if not resultado:
+    #             return {
+    #                 "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+    #                 "conteo_facturas": 0,
+    #                 "monto_total_bruto": 0.0,
+    #                 "monto_neto_total": 0.0,
+    #                 "monto_pagado_acumulado": 0.0,
+    #                 "monto_pendiente_cobro": 0.0
+    #             }
+
+    #         res = resultado[0]
+    #         res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
+    #         return res
+
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+    #         return {"error": str(e)}
+
     def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Analiza montos totales, netos, pagados y pendientes.
-        Excluye facturas Anuladas y permite filtrado opcional por periodo.
-        """
         try:
             pipeline = []
-
+            
             # 1. Filtro base: Omitir Anulados
-            match_filters = {"estado_pago_neto": {"$ne": "Anulado"}}
-            pipeline.append({"$match": match_filters})
+            pipeline.append({"$match": {"estado_pago_neto": {"$ne": "Anulado"}}})
 
-            # 2. Paso clave: Extraer la fecha del PRIMER flete para clasificar
-            # Esto evita duplicados si la factura tiene muchos fletes
+            # 2. Preparar campos numéricos y fecha de referencia
             pipeline.append({
                 "$addFields": {
-                    "fecha_referencia": { 
-                        "$arrayElemAt": ["$datos_completos.fletes.servicio.fecha_servicio", 0] 
-                    }
+                    "fecha_referencia": { "$arrayElemAt": ["$datos_completos.fletes.servicio.fecha_servicio", 0] },
+                    "m_neto": {"$toDouble": "$monto_neto"},
+                    "m_pagado": {"$toDouble": "$monto_pagado_acumulado"},
+                    "m_pendiente": {"$subtract": [{"$toDouble": "$monto_neto"}, {"$toDouble": "$monto_pagado_acumulado"}]}
                 }
             })
 
-            # 3. Filtro por fecha (solo si se pide mes y año)
+            # 3. Filtro por periodo (opcional)
             if mes is not None and anio is not None:
-                mes = int(mes)
-                anio = int(anio)
+                mes, anio = int(mes), int(anio)
                 fecha_inicio = datetime(anio, mes, 1)
                 fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
-                
-                pipeline.append({
-                    "$match": {
-                        "fecha_referencia": { "$gte": fecha_inicio, "$lt": fecha_fin }
-                    }
-                })
+                pipeline.append({"$match": {"fecha_referencia": {"$gte": fecha_inicio, "$lt": fecha_fin}}})
 
-            # 4. Agrupación final (ya no habrá duplicados)
+            # 4. Agrupación con lógica de ESTADO para vencidos
             pipeline.append({
                 "$group": {
                     "_id": None,
                     "conteo_facturas": {"$sum": 1},
                     "total_bruto": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-                    "total_neto": {"$sum": {"$toDouble": "$monto_neto"}},
-                    "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
+                    "total_neto": {"$sum": "$m_neto"},
+                    "total_pagado": {"$sum": "$m_pagado"},
+                    
+                    # --- PAGADAS ---
+                    # Se consideran pagadas si el estado es "Pagado" o el saldo es 0
+                    "cant_pagadas": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Pagado"]}, 1, 0]}
+                    },
+                    
+                    # --- VENCIDAS (Filtrado por estado explícito) ---
+                    "cant_vencidas": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Vencido"]}, 1, 0]}
+                    },
+                    "monto_vencido": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Vencido"]}, "$m_pendiente", 0]}
+                    },
+                    
+                    # --- POR VENCER (Pendientes que no están vencidas ni pagadas) ---
+                    "cant_por_vencer": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Pendiente"]}, 1, 0]}
+                    },
+                    "monto_por_vencer": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Pendiente"]}, "$m_pendiente", 0]}
+                    }
                 }
             })
 
-            # 5. Formateo y Redondeo
+            # 5. Proyección Final
             pipeline.append({
                 "$project": {
                     "_id": 0,
                     "conteo_facturas": 1,
                     "monto_total_bruto": {"$round": ["$total_bruto", 2]},
                     "monto_neto_total": {"$round": ["$total_neto", 2]},
-                    "monto_pagado_acumulado": {"$round": ["$total_pagado", 2]},
-                    "monto_pendiente_cobro": {
-                        "$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]
-                    }
+                    "pagado": {
+                        "cantidad": "$cant_pagadas",
+                        "monto": {"$round": ["$total_pagado", 2]}
+                    },
+                    "vencido": {
+                        "cantidad": "$cant_vencidas",
+                        "monto": {"$round": ["$monto_vencido", 2]}
+                    },
+                    "por_vencer": {
+                        "cantidad": "$cant_por_vencer",
+                        "monto": {"$round": ["$monto_por_vencer", 2]}
+                    },
+                    "monto_total_pendiente": {"$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]}
                 }
             })
 
             resultado = list(self.collection.aggregate(pipeline))
 
             if not resultado:
-                return {
-                    "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
-                    "conteo_facturas": 0,
-                    "monto_total_bruto": 0.0,
-                    "monto_neto_total": 0.0,
-                    "monto_pagado_acumulado": 0.0,
-                    "monto_pendiente_cobro": 0.0
-                }
+                return self._formato_vacio_facturas(mes, anio)
 
             res = resultado[0]
             res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
@@ -184,6 +277,18 @@ class GerenciaService:
         except Exception as e:
             print(f"Error: {e}")
             return {"error": str(e)}
+
+    def _formato_vacio_facturas(self, mes, anio):
+        return {
+            "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+            "conteo_facturas": 0,
+            "monto_total_bruto": 0.0,
+            "monto_neto_total": 0.0,
+            "pagado": {"cantidad": 0, "monto": 0.0},
+            "vencido": {"cantidad": 0, "monto": 0.0},
+            "por_vencer": {"cantidad": 0, "monto": 0.0},
+            "monto_total_pendiente": 0.0
+        }
 
     def obtener_resumen_financiero(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         """
