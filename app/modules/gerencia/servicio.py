@@ -18,98 +18,6 @@ class GerenciaService:
         self.collection = db["facturacion_gestion"]  # Colección de gestiones
         self.facturas_collection = db["facturacion"]  # Colección de facturas   
 
-    
-
-    # def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
-    #     try:
-    #         pipeline = []
-
-    #         # 1. Filtro de fecha SOLO SI se proporcionan ambos
-    #         if mes is not None and anio is not None:
-    #             mes = int(mes)
-    #             anio = int(anio)
-                
-    #             fecha_inicio = datetime(anio, mes, 1, 0, 0, 0)
-    #             if mes == 12:
-    #                 fecha_fin = datetime(anio + 1, 1, 1, 0, 0, 0)
-    #             else:
-    #                 fecha_fin = datetime(anio, mes + 1, 1, 0, 0, 0)
-
-    #             pipeline.append({
-    #                 "$match": {
-    #                     "fecha_creacion": {
-    #                         "$gte": fecha_inicio,
-    #                         "$lt": fecha_fin
-    #                     }
-    #                 }
-    #             })
-
-    #         # 2. Agrupación (Esta corre siempre, sea filtrado o total histórico)
-    #         pipeline.append({
-    #             "$group": {
-    #                 "_id": None,
-    #                 "conteo_total": {"$sum": 1},
-    #                 "monto_pendiente": {
-    #                     "$sum": {
-    #                         "$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]
-    #                     }
-    #                 },
-    #                 "monto_val_sin_fac": {
-    #                     "$sum": {
-    #                         "$cond": [
-    #                             {"$and": [
-    #                                 {"$eq": ["$estado_flete", "VALORIZADO"]},
-    #                                 {"$eq": ["$pertenece_a_factura", False]}
-    #                             ]},
-    #                             {"$toDouble": "$monto_flete"}, 0
-    #                         ]
-    #                     }
-    #                 },
-    #                 "monto_val_con_fac": {
-    #                     "$sum": {
-    #                         "$cond": [
-    #                             {"$and": [
-    #                                 {"$eq": ["$estado_flete", "VALORIZADO"]},
-    #                                 {"$eq": ["$pertenece_a_factura", True]}
-    #                             ]},
-    #                             {"$toDouble": "$monto_flete"}, 0
-    #                         ]
-    #                     }
-    #                 }
-    #             }
-    #         })
-
-    #         # 3. Proyección para formatear resultados
-    #         pipeline.append({
-    #             "$project": {
-    #                 "_id": 0,
-    #                 "conteo_total": 1,
-    #                 "monto_pendiente": {"$round": ["$monto_pendiente", 2]},
-    #                 "monto_val_sin_factura": {"$round": ["$monto_val_sin_fac", 2]},
-    #                 "monto_val_con_factura": {"$round": ["$monto_val_con_fac", 2]},
-    #                 "venta_total": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
-    #             }
-    #         })
-
-    #         resultado = list(self.fletes_collection.aggregate(pipeline))
-
-    #         if not resultado:
-    #             return {
-    #                 "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
-    #                 "conteo_total": 0,
-    #                 "monto_pendiente": 0.0,
-    #                 "monto_val_sin_factura": 0.0,
-    #                 "monto_val_con_factura": 0.0,
-    #                 "venta_total": 0.0
-    #             }
-
-    #         final_res = resultado[0]
-    #         final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
-    #         return final_res
-
-    #     except Exception as e:
-    #         print(f"Error: {e}")
-    #         return {"error": str(e)}
 
     def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         try:
@@ -279,7 +187,8 @@ class GerenciaService:
 
     def obtener_resumen_financiero(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         """
-        Consolida el análisis de fletes y facturas en un solo reporte.
+        Consolida el análisis detallado de fletes (cantidades y montos) 
+        y facturas en un solo reporte financiero.
         """
         try:
             # 1. Ejecutar ambos análisis
@@ -292,18 +201,30 @@ class GerenciaService:
             if "error" in facturas:
                 return {"error": f"Error en análisis de facturas: {facturas['error']}"}
 
-            # 3. Consolidar la respuesta
-            # Usamos el periodo de cualquiera de los dos (son el mismo)
-            periodo_actual = fletes.get("periodo", "N/A")
+            # Extraemos los diccionarios de detalles para acortar el código
+            detalles_f = fletes.get("detalles", {})
+            pendientes = detalles_f.get("pendientes", {})
+            sin_fac = detalles_f.get("valorizados_sin_factura", {})
+            con_fac = detalles_f.get("valorizados_con_factura", {})
 
+            # 3. Consolidar la respuesta
             resumen_consolidado = {
-                "periodo": periodo_actual,
+                "periodo": fletes.get("periodo", "N/A"),
                 "indicadores_fletes": {
-                    "conteo_total": fletes.get("conteo_total", 0),
-                    "monto_pendiente_valorizar": fletes.get("monto_pendiente", 0.0),
-                    "monto_valorizado_sin_factura": fletes.get("monto_val_sin_factura", 0.0),
-                    "monto_valorizado_con_factura": fletes.get("monto_val_con_factura", 0.0),
-                    "venta_total_proyectada": fletes.get("venta_total", 0.0)
+                    "conteo_total_fletes": fletes.get("conteo_total", 0),
+                    "pendientes_valorizar": {
+                        "cantidad": pendientes.get("cantidad", 0),
+                        "monto": pendientes.get("monto", 0.0)
+                    },
+                    "valorizados_sin_factura": {
+                        "cantidad": sin_fac.get("cantidad", 0),
+                        "monto": sin_fac.get("monto", 0.0)
+                    },
+                    "valorizados_con_factura": {
+                        "cantidad": con_fac.get("cantidad", 0),
+                        "monto": con_fac.get("monto", 0.0)
+                    },
+                    "venta_total_valorizada": fletes.get("venta_total_valorizada", 0.0)
                 },
                 "indicadores_facturacion": {
                     "conteo_facturas": facturas.get("conteo_facturas", 0),
@@ -312,11 +233,11 @@ class GerenciaService:
                     "monto_pagado_real": facturas.get("monto_pagado_acumulado", 0.0),
                     "monto_por_cobrar": facturas.get("monto_pendiente_cobro", 0.0)
                 },
-                # Metadatos útiles para cálculos rápidos en el frontend
                 "estado_flujo_caja": {
-                    "total_pendiente_global": round(
-                        fletes.get("monto_pendiente", 0.0) + 
-                        fletes.get("monto_val_sin_factura", 0.0) + 
+                    # Suma: Lo que no se ha cobrado de facturas + lo valorizado sin factura + fletes pendientes
+                    "deuda_total_en_calle": round(
+                        pendientes.get("monto", 0.0) + 
+                        sin_fac.get("monto", 0.0) + 
                         facturas.get("monto_pendiente_cobro", 0.0), 2
                     )
                 }
@@ -327,7 +248,6 @@ class GerenciaService:
         except Exception as e:
             print(f"Error crítico en consolidación: {e}")
             return {"error": str(e)}
-
 
 
     def get_total_valorizado(
