@@ -1315,33 +1315,32 @@ class FacturacionGestionService:
             raise
 
     def _actualizar_vencimientos_automaticos(self):
-
         try:
-                ahora = datetime.now()
-                
-                filtro = {
-                        "datos_completos.fecha_vencimiento": {"$lt": ahora},
-                        "estado_pago_neto": "Pendiente"
+            # 🔹 Tomamos solo el inicio del día actual
+            hoy = datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+            filtro = {
+                "datos_completos.fecha_vencimiento": {"$lt": hoy},
+                "estado_pago_neto": "Pendiente"
+            }
+
+            resultado = self.collection.update_many(
+                filtro,
+                {
+                    "$set": {
+                        "estado_pago_neto": "Vencido",
+                        "ultima_actualizacion": datetime.now()
                     }
-                
-                # 3. Ejecutar la actualización masiva
-                resultado = self.collection.update_many(
-                    filtro, 
-                    {
-                        "$set": {
-                            "estado_pago_neto": "Vencido",
-                            "ultima_actualizacion": ahora
-                        }
-                    }
-                )
-                
-                if resultado.modified_count > 0:
-                    print(f"Sincronización exitosa: {resultado.modified_count} facturas pasaron a Vencida.")
-                
+                }
+            )
+
+            if resultado.modified_count > 0:
+                print(f"✓ {resultado.modified_count} facturas pasaron a Vencida.")
 
         except Exception as e:
-            # Usamos print o tu logger si está configurado
-            print(f"Error  al actualizar vencimientos: {str(e)}")
+            print(f"Error al actualizar vencimientos: {str(e)}")
 
 
 def safe_regex(value: str):

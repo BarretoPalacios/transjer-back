@@ -529,14 +529,14 @@ def analisis_de_facturas(
 
         
 
-@router.get("/auditoria_duplicados_unwind")
-def auditoria_duplicados_unwind(
+@router.get("/obtener_resumen_financiero")
+def obtener_resumen_financiero(
     mes: Optional[int] = Query(None),
     anio: Optional[int] = Query(None),
     gerencia_service: GerenciaService = Depends(get_gerencia_service),
 ):
     try:
-        return gerencia_service.auditoria_duplicados_unwind(
+        return gerencia_service.obtener_resumen_financiero(
             mes, anio
         )
     except Exception as e:

@@ -20,61 +20,136 @@ class GerenciaService:
 
     
 
+    # def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
+    #     try:
+    #         pipeline = []
+
+    #         # 1. Filtro de fecha SOLO SI se proporcionan ambos
+    #         if mes is not None and anio is not None:
+    #             mes = int(mes)
+    #             anio = int(anio)
+                
+    #             fecha_inicio = datetime(anio, mes, 1, 0, 0, 0)
+    #             if mes == 12:
+    #                 fecha_fin = datetime(anio + 1, 1, 1, 0, 0, 0)
+    #             else:
+    #                 fecha_fin = datetime(anio, mes + 1, 1, 0, 0, 0)
+
+    #             pipeline.append({
+    #                 "$match": {
+    #                     "fecha_creacion": {
+    #                         "$gte": fecha_inicio,
+    #                         "$lt": fecha_fin
+    #                     }
+    #                 }
+    #             })
+
+    #         # 2. Agrupación (Esta corre siempre, sea filtrado o total histórico)
+    #         pipeline.append({
+    #             "$group": {
+    #                 "_id": None,
+    #                 "conteo_total": {"$sum": 1},
+    #                 "monto_pendiente": {
+    #                     "$sum": {
+    #                         "$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]
+    #                     }
+    #                 },
+    #                 "monto_val_sin_fac": {
+    #                     "$sum": {
+    #                         "$cond": [
+    #                             {"$and": [
+    #                                 {"$eq": ["$estado_flete", "VALORIZADO"]},
+    #                                 {"$eq": ["$pertenece_a_factura", False]}
+    #                             ]},
+    #                             {"$toDouble": "$monto_flete"}, 0
+    #                         ]
+    #                     }
+    #                 },
+    #                 "monto_val_con_fac": {
+    #                     "$sum": {
+    #                         "$cond": [
+    #                             {"$and": [
+    #                                 {"$eq": ["$estado_flete", "VALORIZADO"]},
+    #                                 {"$eq": ["$pertenece_a_factura", True]}
+    #                             ]},
+    #                             {"$toDouble": "$monto_flete"}, 0
+    #                         ]
+    #                     }
+    #                 }
+    #             }
+    #         })
+
+    #         # 3. Proyección para formatear resultados
+    #         pipeline.append({
+    #             "$project": {
+    #                 "_id": 0,
+    #                 "conteo_total": 1,
+    #                 "monto_pendiente": {"$round": ["$monto_pendiente", 2]},
+    #                 "monto_val_sin_factura": {"$round": ["$monto_val_sin_fac", 2]},
+    #                 "monto_val_con_factura": {"$round": ["$monto_val_con_fac", 2]},
+    #                 "venta_total": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
+    #             }
+    #         })
+
+    #         resultado = list(self.fletes_collection.aggregate(pipeline))
+
+    #         if not resultado:
+    #             return {
+    #                 "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+    #                 "conteo_total": 0,
+    #                 "monto_pendiente": 0.0,
+    #                 "monto_val_sin_factura": 0.0,
+    #                 "monto_val_con_factura": 0.0,
+    #                 "venta_total": 0.0
+    #             }
+
+    #         final_res = resultado[0]
+    #         final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
+    #         return final_res
+
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+    #         return {"error": str(e)}
+
     def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         try:
             pipeline = []
 
-            # 1. Filtro de fecha SOLO SI se proporcionan ambos
+            # 1. Filtro de fecha
             if mes is not None and anio is not None:
-                mes = int(mes)
-                anio = int(anio)
-                
-                fecha_inicio = datetime(anio, mes, 1, 0, 0, 0)
-                if mes == 12:
-                    fecha_fin = datetime(anio + 1, 1, 1, 0, 0, 0)
-                else:
-                    fecha_fin = datetime(anio, mes + 1, 1, 0, 0, 0)
+                mes, anio = int(mes), int(anio)
+                fecha_inicio = datetime(anio, mes, 1)
+                fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
 
                 pipeline.append({
                     "$match": {
-                        "fecha_creacion": {
-                            "$gte": fecha_inicio,
-                            "$lt": fecha_fin
-                        }
+                        "fecha_creacion": {"$gte": fecha_inicio, "$lt": fecha_fin}
                     }
                 })
 
-            # 2. Agrupación (Esta corre siempre, sea filtrado o total histórico)
+            # 2. Agrupación con CONTEOS específicos
             pipeline.append({
                 "$group": {
                     "_id": None,
                     "conteo_total": {"$sum": 1},
+                    # Conteo y Monto Pendientes
+                    "cant_pendiente": {"$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}},
                     "monto_pendiente": {
-                        "$sum": {
-                            "$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]
-                        }
+                        "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]}
+                    },
+                    # Conteo y Monto Valorizados SIN Factura
+                    "cant_val_sin_fac": {
+                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, 1, 0]}
                     },
                     "monto_val_sin_fac": {
-                        "$sum": {
-                            "$cond": [
-                                {"$and": [
-                                    {"$eq": ["$estado_flete", "VALORIZADO"]},
-                                    {"$eq": ["$pertenece_a_factura", False]}
-                                ]},
-                                {"$toDouble": "$monto_flete"}, 0
-                            ]
-                        }
+                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, {"$toDouble": "$monto_flete"}, 0]}
+                    },
+                    # Conteo y Monto Valorizados CON Factura
+                    "cant_val_con_fac": {
+                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, 1, 0]}
                     },
                     "monto_val_con_fac": {
-                        "$sum": {
-                            "$cond": [
-                                {"$and": [
-                                    {"$eq": ["$estado_flete", "VALORIZADO"]},
-                                    {"$eq": ["$pertenece_a_factura", True]}
-                                ]},
-                                {"$toDouble": "$monto_flete"}, 0
-                            ]
-                        }
+                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, {"$toDouble": "$monto_flete"}, 0]}
                     }
                 }
             })
@@ -83,11 +158,23 @@ class GerenciaService:
             pipeline.append({
                 "$project": {
                     "_id": 0,
+                    "periodo": {"$literal": f"{mes}/{anio}" if mes else "HISTORICO TOTAL"},
                     "conteo_total": 1,
-                    "monto_pendiente": {"$round": ["$monto_pendiente", 2]},
-                    "monto_val_sin_factura": {"$round": ["$monto_val_sin_fac", 2]},
-                    "monto_val_con_factura": {"$round": ["$monto_val_con_fac", 2]},
-                    "venta_total": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
+                    "detalles": {
+                        "pendientes": {
+                            "cantidad": "$cant_pendiente",
+                            "monto": {"$round": ["$monto_pendiente", 2]}
+                        },
+                        "valorizados_sin_factura": {
+                            "cantidad": "$cant_val_sin_fac",
+                            "monto": {"$round": ["$monto_val_sin_fac", 2]}
+                        },
+                        "valorizados_con_factura": {
+                            "cantidad": "$cant_val_con_fac",
+                            "monto": {"$round": ["$monto_val_con_fac", 2]}
+                        }
+                    },
+                    "venta_total_valorizada": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
                 }
             })
 
@@ -97,18 +184,17 @@ class GerenciaService:
                 return {
                     "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
                     "conteo_total": 0,
-                    "monto_pendiente": 0.0,
-                    "monto_val_sin_factura": 0.0,
-                    "monto_val_con_factura": 0.0,
-                    "venta_total": 0.0
+                    "detalles": {
+                        "pendientes": {"cantidad": 0, "monto": 0.0},
+                        "valorizados_sin_factura": {"cantidad": 0, "monto": 0.0},
+                        "valorizados_con_factura": {"cantidad": 0, "monto": 0.0}
+                    },
+                    "venta_total_valorizada": 0.0
                 }
 
-            final_res = resultado[0]
-            final_res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
-            return final_res
+            return resultado[0]
 
         except Exception as e:
-            print(f"Error: {e}")
             return {"error": str(e)}
 
     def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
@@ -191,64 +277,55 @@ class GerenciaService:
             print(f"Error: {e}")
             return {"error": str(e)}
 
-
-    def auditoria_duplicados_unwind(self, mes: int, anio: int) -> Dict[str, Any]:
+    def obtener_resumen_financiero(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         """
-        Usa $unwind para identificar qué facturas tienen múltiples fletes
-        y cuánto están 'aportando' extra al total debido a la duplicación.
+        Consolida el análisis de fletes y facturas en un solo reporte.
         """
         try:
-            inicio = datetime(anio, mes, 1)
-            fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+            # 1. Ejecutar ambos análisis
+            fletes = self.analisis_de_fletes(mes=mes, anio=anio)
+            facturas = self.analisis_de_facturas(mes=mes, anio=anio)
 
-            pipeline = [
-                # 1. Filtramos las que no están anuladas
-                {"$match": {"estado_pago_neto": {"$ne": "Anulado"}}},
-                
-                # 2. Desglosamos los fletes (Aquí ocurre la duplicación)
-                {"$unwind": "$datos_completos.fletes"},
-                
-                # 3. Filtramos por la fecha de cada flete individual
-                {
-                    "$match": {
-                        "datos_completos.fletes.servicio.fecha_servicio": {
-                            "$gte": inicio,
-                            "$lt": fin
-                        }
-                    }
+            # 2. Verificar si hubo errores en las funciones individuales
+            if "error" in fletes:
+                return {"error": f"Error en análisis de fletes: {fletes['error']}"}
+            if "error" in facturas:
+                return {"error": f"Error en análisis de facturas: {facturas['error']}"}
+
+            # 3. Consolidar la respuesta
+            # Usamos el periodo de cualquiera de los dos (son el mismo)
+            periodo_actual = fletes.get("periodo", "N/A")
+
+            resumen_consolidado = {
+                "periodo": periodo_actual,
+                "indicadores_fletes": {
+                    "conteo_total": fletes.get("conteo_total", 0),
+                    "monto_pendiente_valorizar": fletes.get("monto_pendiente", 0.0),
+                    "monto_valorizado_sin_factura": fletes.get("monto_val_sin_factura", 0.0),
+                    "monto_valorizado_con_factura": fletes.get("monto_val_con_factura", 0.0),
+                    "venta_total_proyectada": fletes.get("venta_total", 0.0)
                 },
-                
-                # 4. Agrupamos por código de factura para contar cuántas veces aparece
-                {
-                    "$group": {
-                        "_id": "$codigo_factura",
-                        "repeticiones": {"$sum": 1},
-                        "monto_factura": {"$first": {"$toDouble": "$monto_neto"}},
-                        "monto_inflado_total": {"$sum": {"$toDouble": "$monto_neto"}}
-                    }
+                "indicadores_facturacion": {
+                    "conteo_facturas": facturas.get("conteo_facturas", 0),
+                    "monto_total_bruto": facturas.get("monto_total_bruto", 0.0),
+                    "monto_neto_total": facturas.get("monto_neto_total", 0.0),
+                    "monto_pagado_real": facturas.get("monto_pagado_acumulado", 0.0),
+                    "monto_por_cobrar": facturas.get("monto_pendiente_cobro", 0.0)
                 },
-                
-                # 5. Filtramos solo las que aparecen más de una vez
-                {"$match": {"repeticiones": {"$gt": 1}}},
-                
-                # 6. Ordenamos por las más repetidas
-                {"$sort": {"repeticiones": -1}}
-            ]
-
-            duplicados = list(self.collection.aggregate(pipeline))
-
-            # Calculamos el impacto total del error
-            exceso_total = sum(d["monto_inflado_total"] - d["monto_factura"] for d in duplicados)
-
-            return {
-                "periodo": f"{mes}/{anio}",
-                "total_facturas_duplicadas": len(duplicados),
-                "exceso_de_monto_por_duplicidad": round(exceso_total, 2),
-                "detalle_facturas": duplicados
+                # Metadatos útiles para cálculos rápidos en el frontend
+                "estado_flujo_caja": {
+                    "total_pendiente_global": round(
+                        fletes.get("monto_pendiente", 0.0) + 
+                        fletes.get("monto_val_sin_factura", 0.0) + 
+                        facturas.get("monto_pendiente_cobro", 0.0), 2
+                    )
+                }
             }
 
+            return resumen_consolidado
+
         except Exception as e:
-            print(f"Error en auditoría: {e}")
+            print(f"Error crítico en consolidación: {e}")
             return {"error": str(e)}
 
 
