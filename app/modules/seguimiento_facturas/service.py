@@ -1316,13 +1316,13 @@ class FacturacionGestionService:
 
     def _actualizar_vencimientos_automaticos(self):
         try:
-            # 🔹 Tomamos solo el inicio del día actual
-            hoy = datetime.now().replace(
+            mañana = (datetime.now() + timedelta(days=1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
 
             filtro = {
-                "datos_completos.fecha_vencimiento": {"$lt": hoy},
+                # $lt mañana significa: "Todo lo que vence hoy a las 23:59 o antes"
+                "datos_completos.fecha_vencimiento": {"$lt": mañana},
                 "estado_pago_neto": "Pendiente"
             }
 
