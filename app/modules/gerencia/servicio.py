@@ -105,86 +105,6 @@ class GerenciaService:
         except Exception as e:
             return {"error": str(e)}
 
-    # def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
-    #     """
-    #     Analiza montos totales, netos, pagados y pendientes.
-    #     Excluye facturas Anuladas y permite filtrado opcional por periodo.
-    #     """
-    #     try:
-    #         pipeline = []
-
-    #         # 1. Filtro base: Omitir Anulados
-    #         match_filters = {"estado_pago_neto": {"$ne": "Anulado"}}
-    #         pipeline.append({"$match": match_filters})
-
-    #         # 2. Paso clave: Extraer la fecha del PRIMER flete para clasificar
-    #         # Esto evita duplicados si la factura tiene muchos fletes
-    #         pipeline.append({
-    #             "$addFields": {
-    #                 "fecha_referencia": { 
-    #                     "$arrayElemAt": ["$datos_completos.fletes.servicio.fecha_servicio", 0] 
-    #                 }
-    #             }
-    #         })
-
-    #         # 3. Filtro por fecha (solo si se pide mes y año)
-    #         if mes is not None and anio is not None:
-    #             mes = int(mes)
-    #             anio = int(anio)
-    #             fecha_inicio = datetime(anio, mes, 1)
-    #             fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
-                
-    #             pipeline.append({
-    #                 "$match": {
-    #                     "fecha_referencia": { "$gte": fecha_inicio, "$lt": fecha_fin }
-    #                 }
-    #             })
-
-    #         # 4. Agrupación final (ya no habrá duplicados)
-    #         pipeline.append({
-    #             "$group": {
-    #                 "_id": None,
-    #                 "conteo_facturas": {"$sum": 1},
-    #                 "total_bruto": {"$sum": {"$toDouble": "$datos_completos.monto_total"}},
-    #                 "total_neto": {"$sum": {"$toDouble": "$monto_neto"}},
-    #                 "total_pagado": {"$sum": {"$toDouble": "$monto_pagado_acumulado"}}
-    #             }
-    #         })
-
-    #         # 5. Formateo y Redondeo
-    #         pipeline.append({
-    #             "$project": {
-    #                 "_id": 0,
-    #                 "conteo_facturas": 1,
-    #                 "monto_total_bruto": {"$round": ["$total_bruto", 2]},
-    #                 "monto_neto_total": {"$round": ["$total_neto", 2]},
-    #                 "monto_pagado_acumulado": {"$round": ["$total_pagado", 2]},
-    #                 "monto_pendiente_cobro": {
-    #                     "$round": [{"$subtract": ["$total_neto", "$total_pagado"]}, 2]
-    #                 }
-    #             }
-    #         })
-
-    #         resultado = list(self.collection.aggregate(pipeline))
-
-    #         if not resultado:
-    #             return {
-    #                 "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
-    #                 "conteo_facturas": 0,
-    #                 "monto_total_bruto": 0.0,
-    #                 "monto_neto_total": 0.0,
-    #                 "monto_pagado_acumulado": 0.0,
-    #                 "monto_pendiente_cobro": 0.0
-    #             }
-
-    #         res = resultado[0]
-    #         res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
-    #         return res
-
-    #     except Exception as e:
-    #         print(f"Error: {e}")
-    #         return {"error": str(e)}
-
     def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         try:
             pipeline = []
@@ -268,7 +188,16 @@ class GerenciaService:
             resultado = list(self.collection.aggregate(pipeline))
 
             if not resultado:
-                return self._formato_vacio_facturas(mes, anio)
+                return {
+                    "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+                    "conteo_facturas": 0,
+                    "monto_total_bruto": 0.0,
+                    "monto_neto_total": 0.0,
+                    "pagado": {"cantidad": 0, "monto": 0.0},
+                    "vencido": {"cantidad": 0, "monto": 0.0},
+                    "por_vencer": {"cantidad": 0, "monto": 0.0},
+                    "monto_total_pendiente": 0.0
+                }
 
             res = resultado[0]
             res["periodo"] = f"{mes}/{anio}" if mes else "HISTORICO TOTAL"
@@ -278,25 +207,13 @@ class GerenciaService:
             print(f"Error: {e}")
             return {"error": str(e)}
 
-    def _formato_vacio_facturas(self, mes, anio):
-        return {
-            "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
-            "conteo_facturas": 0,
-            "monto_total_bruto": 0.0,
-            "monto_neto_total": 0.0,
-            "pagado": {"cantidad": 0, "monto": 0.0},
-            "vencido": {"cantidad": 0, "monto": 0.0},
-            "por_vencer": {"cantidad": 0, "monto": 0.0},
-            "monto_total_pendiente": 0.0
-        }
-
     def obtener_resumen_financiero(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         """
-        Consolida el análisis detallado de fletes (cantidades y montos) 
-        y facturas en un solo reporte financiero.
+        Consolida el análisis detallado de fletes y el estado de cobranza 
+        de facturas (Pagadas, Vencidas y Por Vencer).
         """
         try:
-            # 1. Ejecutar ambos análisis
+            # 1. Ejecutar ambos análisis actualizados
             fletes = self.analisis_de_fletes(mes=mes, anio=anio)
             facturas = self.analisis_de_facturas(mes=mes, anio=anio)
 
@@ -306,44 +223,60 @@ class GerenciaService:
             if "error" in facturas:
                 return {"error": f"Error en análisis de facturas: {facturas['error']}"}
 
-            # Extraemos los diccionarios de detalles para acortar el código
+            # Extraemos sub-objetos para facilitar el acceso
             detalles_f = fletes.get("detalles", {})
-            pendientes = detalles_f.get("pendientes", {})
-            sin_fac = detalles_f.get("valorizados_sin_factura", {})
-            con_fac = detalles_f.get("valorizados_con_factura", {})
+            f_pendientes = detalles_f.get("pendientes", {})
+            f_sin_fac = detalles_f.get("valorizados_sin_factura", {})
+            f_con_fac = detalles_f.get("valorizados_con_factura", {})
 
-            # 3. Consolidar la respuesta
+            # 3. Consolidar la respuesta integral
             resumen_consolidado = {
                 "periodo": fletes.get("periodo", "N/A"),
-                "indicadores_fletes": {
+                
+                "operacion_fletes": {
                     "conteo_total_fletes": fletes.get("conteo_total", 0),
                     "pendientes_valorizar": {
-                        "cantidad": pendientes.get("cantidad", 0),
-                        "monto": pendientes.get("monto", 0.0)
+                        "cantidad": f_pendientes.get("cantidad", 0),
+                        "monto": f_pendientes.get("monto", 0.0)
                     },
-                    "valorizados_sin_factura": {
-                        "cantidad": sin_fac.get("cantidad", 0),
-                        "monto": sin_fac.get("monto", 0.0)
+                    "valorizados_sin_facturar": {
+                        "cantidad": f_sin_fac.get("cantidad", 0),
+                        "monto": f_sin_fac.get("monto", 0.0)
                     },
-                    "valorizados_con_factura": {
-                        "cantidad": con_fac.get("cantidad", 0),
-                        "monto": con_fac.get("monto", 0.0)
+                    "valorizados_en_factura": {
+                        "cantidad": f_con_fac.get("cantidad", 0),
+                        "monto": f_con_fac.get("monto", 0.0)
                     },
-                    "venta_total_valorizada": fletes.get("venta_total_valorizada", 0.0)
+                    "total_venta_valorizada": fletes.get("venta_total_valorizada", 0.0)
                 },
-                "indicadores_facturacion": {
-                    "conteo_facturas": facturas.get("conteo_facturas", 0),
-                    "monto_total_bruto": facturas.get("monto_total_bruto", 0.0),
-                    "monto_neto_total": facturas.get("monto_neto_total", 0.0),
-                    "monto_pagado_real": facturas.get("monto_pagado_acumulado", 0.0),
-                    "monto_por_cobrar": facturas.get("monto_pendiente_cobro", 0.0)
+                
+                "cobranza_facturas": {
+                    "total_documentos": facturas.get("conteo_facturas", 0),
+                    "monto_neto_cartera": facturas.get("monto_neto_total", 0.0),
+                    "pagado": {
+                        "cantidad": facturas.get("pagado", {}).get("cantidad", 0),
+                        "monto": facturas.get("pagado", {}).get("monto", 0.0)
+                    },
+                    "vencido_por_estado": {
+                        "cantidad": facturas.get("vencido", {}).get("cantidad", 0),
+                        "monto": facturas.get("vencido", {}).get("monto", 0.0)
+                    },
+                    "por_vencer_pendiente": {
+                        "cantidad": facturas.get("por_vencer", {}).get("cantidad", 0),
+                        "monto": facturas.get("por_vencer", {}).get("monto", 0.0)
+                    },
+                    "deuda_total_facturada": facturas.get("monto_total_pendiente", 0.0)
                 },
-                "estado_flujo_caja": {
-                    # Suma: Lo que no se ha cobrado de facturas + lo valorizado sin factura + fletes pendientes
-                    "deuda_total_en_calle": round(
-                        pendientes.get("monto", 0.0) + 
-                        sin_fac.get("monto", 0.0) + 
-                        facturas.get("monto_pendiente_cobro", 0.0), 2
+                
+                "kpis_financieros": {
+                    # Dinero que ya debería estar en cuenta pero sigue en gestión
+                    "riesgo_vencido": facturas.get("vencido", {}).get("monto", 0.0),
+                    
+                    # Dinero total que la empresa tiene "en la calle" (Fletes + Facturas pendientes)
+                    "capital_en_transito_total": round(
+                        f_pendientes.get("monto", 0.0) + 
+                        f_sin_fac.get("monto", 0.0) + 
+                        facturas.get("monto_total_pendiente", 0.0), 2
                     )
                 }
             }
