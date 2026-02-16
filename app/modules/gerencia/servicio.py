@@ -223,65 +223,10 @@ class GerenciaService:
             if "error" in facturas:
                 return {"error": f"Error en análisis de facturas: {facturas['error']}"}
 
-            # Extraemos sub-objetos para facilitar el acceso
-            detalles_f = fletes.get("detalles", {})
-            f_pendientes = detalles_f.get("pendientes", {})
-            f_sin_fac = detalles_f.get("valorizados_sin_factura", {})
-            f_con_fac = detalles_f.get("valorizados_con_factura", {})
-
-            # 3. Consolidar la respuesta integral
-            resumen_consolidado = {
-                "periodo": fletes.get("periodo", "N/A"),
-                
-                "operacion_fletes": {
-                    "conteo_total_fletes": fletes.get("conteo_total", 0),
-                    "pendientes_valorizar": {
-                        "cantidad": f_pendientes.get("cantidad", 0),
-                        "monto": f_pendientes.get("monto", 0.0)
-                    },
-                    "valorizados_sin_facturar": {
-                        "cantidad": f_sin_fac.get("cantidad", 0),
-                        "monto": f_sin_fac.get("monto", 0.0)
-                    },
-                    "valorizados_en_factura": {
-                        "cantidad": f_con_fac.get("cantidad", 0),
-                        "monto": f_con_fac.get("monto", 0.0)
-                    },
-                    "total_venta_valorizada": fletes.get("venta_total_valorizada", 0.0)
-                },
-                
-                "cobranza_facturas": {
-                    "total_documentos": facturas.get("conteo_facturas", 0),
-                    "monto_neto_cartera": facturas.get("monto_neto_total", 0.0),
-                    "pagado": {
-                        "cantidad": facturas.get("pagado", {}).get("cantidad", 0),
-                        "monto": facturas.get("pagado", {}).get("monto", 0.0)
-                    },
-                    "vencido_por_estado": {
-                        "cantidad": facturas.get("vencido", {}).get("cantidad", 0),
-                        "monto": facturas.get("vencido", {}).get("monto", 0.0)
-                    },
-                    "por_vencer_pendiente": {
-                        "cantidad": facturas.get("por_vencer", {}).get("cantidad", 0),
-                        "monto": facturas.get("por_vencer", {}).get("monto", 0.0)
-                    },
-                    "deuda_total_facturada": facturas.get("monto_total_pendiente", 0.0)
-                },
-                
-                "kpis_financieros": {
-                    # Dinero que ya debería estar en cuenta pero sigue en gestión
-                    "riesgo_vencido": facturas.get("vencido", {}).get("monto", 0.0),
-                    
-                    # Dinero total que la empresa tiene "en la calle" (Fletes + Facturas pendientes)
-                    "capital_en_transito_total": round(
-                        f_pendientes.get("monto", 0.0) + 
-                        f_sin_fac.get("monto", 0.0) + 
-                        facturas.get("monto_total_pendiente", 0.0), 2
-                    )
-                }
+            return {
+                "fletes":fletes,
+                "facturas":facturas
             }
-
-            return resumen_consolidado
 
         except Exception as e:
             print(f"Error crítico en consolidación: {e}")
