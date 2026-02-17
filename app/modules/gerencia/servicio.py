@@ -1098,9 +1098,9 @@ class GerenciaService:
                     date_filter["$gte"] = fecha_inicio
                 if fecha_fin:
                     date_filter["$lte"] = fecha_fin
-                match_filters["datos_completos.fecha_emision"] = date_filter
+                # match_filters["datos_completos.fecha_emision"] = date_filter
                 # en el caso sea por servicios
-                # match_filters["datos_completos.fletes.servicio.fecha_servicio"] = date_filter
+                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = date_filter
 
             if match_filters:
                 pipeline.append({"$match": match_filters})
