@@ -6,6 +6,8 @@ from app.core.database import get_database
 from app.modules.gerencia.servicio import GerenciaService
 from fastapi.responses import StreamingResponse
 
+from app.modules.gerencia.export_data import AnalisisLogistica
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/gerencia", tags=["Gerencia"])
@@ -563,3 +565,26 @@ nombre_proveedor: Optional[str] = Query(None),
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))  
+
+
+@router.get("/export/data-maestra-completa")
+def exportar_data_maestra_completa():
+    try:
+        db = get_database()
+        service = AnalisisLogistica(db)
+        
+        # Llamamos a la función sin filtros
+        excel_file = service.exportar_todo_maestro_stream()
+        
+        filename = f"DATA_MAESTRA_TOTAL_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error al generar el export total: {str(e)}"
+        )
