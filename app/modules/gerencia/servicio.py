@@ -1093,7 +1093,7 @@ class GerenciaService:
                 if fecha_fin: date_filter["$lte"] = fecha_fin
                 
                 # Filtramos documentos donde AL MENOS UN servicio cumple la fecha
-                match_filters["datos_completos.fletes.servicio.fecha_servicio"] = date_filter
+                match_filters["datos_completos.fletes.0.servicio.fecha_servicio"] = date_filter
 
             if match_filters:
                 pipeline.append({"$match": match_filters})
