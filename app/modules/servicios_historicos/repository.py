@@ -691,7 +691,7 @@ class ServicioRepository:
             
             if not servicios:
                 df = pd.DataFrame(columns=[
-                    "ID", "Cliente", "Servicio", "Proveedor", "Cliente Destino",
+                    "ID", "Cliente", "Servicio","Tipo", "Proveedor", "Cliente Destino",
                     "GRTE", "Conductor", "Auxiliar", "Placa", "Tipo Camión",
                     "Capacidad M3", "Capacidad TN", "Origen", "Destino",
                     "Fecha Servicio", "Fecha Salida", "Mes", "Estado Servicio",
@@ -716,6 +716,7 @@ class ServicioRepository:
                         "ID": servicio.get("_id", ""),
                         "Cliente": servicio.get("cliente", ""),
                         "Servicio": servicio.get("servicio", ""),
+                        "Tipo":servicio.get("tipo_servicio", ""),
                         "Proveedor": servicio.get("proveedor", ""),
                         "Cliente Destino": servicio.get("cliente_destino", ""),
                         "GRTE": servicio.get("grte", ""),
