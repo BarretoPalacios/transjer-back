@@ -1069,18 +1069,13 @@ class GerenciaService:
             pipeline = []
             ahora = datetime.now()
 
-            # --- Lógica sin calendar ---
+            # --- Lógica de fechas ---
             if mes and anio:
-                # Inicio del mes solicitado
                 fecha_inicio = datetime(anio, mes, 1)
-                
-                # Calculamos el inicio del mes siguiente
                 if mes == 12:
                     siguiente_mes = datetime(anio + 1, 1, 1)
                 else:
                     siguiente_mes = datetime(anio, mes + 1, 1)
-                
-                # El fin es un segundo antes de que empiece el mes siguiente
                 fecha_fin = siguiente_mes - timedelta(seconds=1)
 
             # 1. Filtros dinámicos
@@ -1094,61 +1089,40 @@ class GerenciaService:
 
             if fecha_inicio or fecha_fin:
                 date_filter = {}
-                if fecha_inicio:
-                    date_filter["$gte"] = fecha_inicio
-                if fecha_fin:
-                    date_filter["$lte"] = fecha_fin
-                # match_filters["datos_completos.fecha_emision"] = date_filter
-                # en el caso sea por servicios
+                if fecha_inicio: date_filter["$gte"] = fecha_inicio
+                if fecha_fin: date_filter["$lte"] = fecha_fin
+                
+                # Filtramos documentos donde AL MENOS UN servicio cumple la fecha
                 match_filters["datos_completos.fletes.servicio.fecha_servicio"] = date_filter
 
             if match_filters:
                 pipeline.append({"$match": match_filters})
 
-            # 2. Agrupación financiera (NETO)
+            # --- PASO CLAVE: Evitar duplicidad si usas unwind o filtros de array ---
+            # Si un documento tiene varios fletes del mismo mes, el match lo trae una vez.
+            # Agrupamos por el ID de la factura primero para asegurar montos únicos.
+
+            # 2. Agrupación por Cliente
             pipeline.append({
                 "$group": {
-                    "_id": {
-                        "$arrayElemAt": [
-                            "$datos_completos.fletes.servicio.nombre_cliente",
-                            0
-                        ]
+                    "_id": { 
+                        # Usamos el primer nombre de cliente que encuentre en el array
+                        "$arrayElemAt": ["$datos_completos.fletes.servicio.nombre_cliente", 0] 
                     },
-
                     "total_facturas": {"$sum": 1},
-
-                    # BRUTO
                     "total_facturado": {"$sum": "$datos_completos.monto_total"},
-
-                    # DETRACCION
                     "total_detraccion": {"$sum": "$monto_detraccion"},
-
-                    # NETO REAL
                     "total_neto": {"$sum": "$monto_neto"},
-
-                    # NETO PAGADO
                     "total_neto_pagado": {
                         "$sum": {
-                            "$cond": [
-                                {"$eq": ["$estado_pago_neto", "Pagado"]},
-                                "$monto_neto",
-                                0
-                            ]
+                            "$cond": [{"$eq": ["$estado_pago_neto", "Pagado"]}, "$monto_neto", 0]
                         }
                     },
-
-                    # NETO PENDIENTE
                     "total_neto_pendiente": {
                         "$sum": {
-                            "$cond": [
-                                {"$ne": ["$estado_pago_neto", "Pagado"]},
-                                "$monto_neto",
-                                0
-                            ]
+                            "$cond": [{"$ne": ["$estado_pago_neto", "Pagado"]}, "$monto_neto", 0]
                         }
                     },
-
-                    # NETO VENCIDO
                     "total_neto_vencido": {
                         "$sum": {
                             "$cond": [
@@ -1163,8 +1137,6 @@ class GerenciaService:
                             ]
                         }
                     },
-
-                    # NETO POR VENCER
                     "total_neto_por_vencer": {
                         "$sum": {
                             "$cond": [
@@ -1182,13 +1154,8 @@ class GerenciaService:
                 }
             })
 
-            # 3. Orden por riesgo financiero
-            pipeline.append({
-                "$sort": {
-                    "total_neto_vencido": -1,
-                    "total_neto_pendiente": -1
-                }
-            })
+            # 3. Orden y ejecución (resto del código igual...)
+            pipeline.append({"$sort": {"total_neto_vencido": -1, "total_neto_pendiente": -1}})
 
             resultados = list(
                 self.db["facturacion_gestion"].aggregate(pipeline)
