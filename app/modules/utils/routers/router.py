@@ -94,3 +94,27 @@ async def get_proveedores_list():
     
     # 4. Retornar lista ordenada alfabéticamente
     return sorted(list(combinada))
+
+@router.get("/placas-list")
+async def get_placas_list():
+    lista_estatica =  [
+    "BVR-727" ,
+    "CBB-773",
+    "CAG-817",
+    "CDM-793",
+    "CDN-786",
+    "CDQ-786",
+    "CDQ-743",
+    "BXS-909",
+    "BYH-716",
+    "C5Q-932",
+    "D4D-838",
+    "BZH-921",
+    "BPF-700",
+    "BJA-838",
+    "F5F-264",
+    "ARN-774"
+    #   "D7T-467",
+    #   "BNG-908"
+    ]
+    return sorted(lista_estatica)

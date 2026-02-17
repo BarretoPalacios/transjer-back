@@ -233,108 +233,109 @@ class GerenciaService:
             print(f"Error crítico en consolidación: {e}")
             return {"error": str(e)}
 
-    def obtener_fletes_por_fecha_servicio(
-            self, 
-            nombre_proveedor: Optional[str] = None, 
-            fecha_inicio: Optional[datetime] = None, 
-            fecha_fin: Optional[datetime] = None,
-            pagina: int = 1,
-            limite: int = 20
-        ) -> Dict[str, Any]:
-            try:
-                skip = (pagina - 1) * limite
-                pipeline = []
+    # no barrrar esta funcion ya que trae fletes y servicios a la vez 
+    # def obtener_fletes_por_fecha_servicio(
+    #         self, 
+    #         nombre_proveedor: Optional[str] = None, 
+    #         fecha_inicio: Optional[datetime] = None, 
+    #         fecha_fin: Optional[datetime] = None,
+    #         pagina: int = 1,
+    #         limite: int = 20
+    #     ) -> Dict[str, Any]:
+    #         try:
+    #             skip = (pagina - 1) * limite
+    #             pipeline = []
 
-                # 1. Unir con servicio_principal primero para poder filtrar por su fecha
-                pipeline.append({
-                    "$lookup": {
-                        "from": "servicio_principal",
-                        "let": {"id_serv": "$servicio_id"},
-                        "pipeline": [
-                            {
-                                "$match": {
-                                    "$expr": {
-                                        "$eq": ["$_id", {"$toObjectId": "$$id_serv"}]
-                                    }
-                                }
-                            }
-                        ],
-                        "as": "detalle_servicio"
-                    }
-                })
+    #             # 1. Unir con servicio_principal primero para poder filtrar por su fecha
+    #             pipeline.append({
+    #                 "$lookup": {
+    #                     "from": "servicio_principal",
+    #                     "let": {"id_serv": "$servicio_id"},
+    #                     "pipeline": [
+    #                         {
+    #                             "$match": {
+    #                                 "$expr": {
+    #                                     "$eq": ["$_id", {"$toObjectId": "$$id_serv"}]
+    #                                 }
+    #                             }
+    #                         }
+    #                     ],
+    #                     "as": "detalle_servicio"
+    #                 }
+    #             })
 
-                # 2. Descomponer el array (importante para filtrar campos internos)
-                pipeline.append({"$unwind": "$detalle_servicio"})
+    #             # 2. Descomponer el array (importante para filtrar campos internos)
+    #             pipeline.append({"$unwind": "$detalle_servicio"})
 
-                # 3. Filtros combinados: Fecha de Servicio y Proveedor
-                match_filters = {}
-                if fecha_inicio or fecha_fin:
-                    match_filters["detalle_servicio.fecha_servicio"] = {}
-                    if fecha_inicio:
-                        match_filters["detalle_servicio.fecha_servicio"]["$gte"] = fecha_inicio
-                    if fecha_fin:
-                        match_filters["detalle_servicio.fecha_servicio"]["$lte"] = fecha_fin
+    #             # 3. Filtros combinados: Fecha de Servicio y Proveedor
+    #             match_filters = {}
+    #             if fecha_inicio or fecha_fin:
+    #                 match_filters["detalle_servicio.fecha_servicio"] = {}
+    #                 if fecha_inicio:
+    #                     match_filters["detalle_servicio.fecha_servicio"]["$gte"] = fecha_inicio
+    #                 if fecha_fin:
+    #                     match_filters["detalle_servicio.fecha_servicio"]["$lte"] = fecha_fin
 
-                if nombre_proveedor:
-                    match_filters["detalle_servicio.proveedor.nombre"] = {
-                        "$regex": nombre_proveedor, 
-                        "$options": "i" 
-                    }
+    #             if nombre_proveedor:
+    #                 match_filters["detalle_servicio.proveedor.nombre"] = {
+    #                     "$regex": nombre_proveedor, 
+    #                     "$options": "i" 
+    #                 }
 
-                if match_filters:
-                    pipeline.append({"$match": match_filters})
+    #             if match_filters:
+    #                 pipeline.append({"$match": match_filters})
 
-                # 4. Facet para conteo total y paginación
-                pipeline.append({
-                    "$facet": {
-                        "metadatos": [{"$count": "total_registros"}],
-                        "datos": [
-                            {"$sort": {"detalle_servicio.fecha_servicio": -1}},
-                            {"$skip": skip},
-                            {"$limit": limite},
-                            {
-                                "$project": {
-                                    "_id": 0,
-                                    "flete": "$$ROOT",
-                                    "servicio": "$detalle_servicio"
-                                }
-                            },
-                            {"$project": {"flete.detalle_servicio": 0}}
-                        ]
-                    }
-                })
+    #             # 4. Facet para conteo total y paginación
+    #             pipeline.append({
+    #                 "$facet": {
+    #                     "metadatos": [{"$count": "total_registros"}],
+    #                     "datos": [
+    #                         {"$sort": {"detalle_servicio.fecha_servicio": -1}},
+    #                         {"$skip": skip},
+    #                         {"$limit": limite},
+    #                         {
+    #                             "$project": {
+    #                                 "_id": 0,
+    #                                 "flete": "$$ROOT",
+    #                                 "servicio": "$detalle_servicio"
+    #                             }
+    #                         },
+    #                         {"$project": {"flete.detalle_servicio": 0}}
+    #                     ]
+    #                 }
+    #             })
 
-                resultado_raw = list(self.fletes_collection.aggregate(pipeline))[0]
+    #             resultado_raw = list(self.fletes_collection.aggregate(pipeline))[0]
                 
-                # --- LÓGICA DE SERIALIZACIÓN INTERNA ---
-                def limpiar_docs(obj):
-                    if isinstance(obj, list):
-                        return [limpiar_docs(item) for item in obj]
-                    if isinstance(obj, dict):
-                        return {k: limpiar_docs(v) for k, v in obj.items()}
-                    if isinstance(obj, ObjectId):
-                        return str(obj)
-                    if isinstance(obj, datetime):
-                        return obj.isoformat() # Opcional: convierte fechas a string ISO
-                    return obj
+    #             # --- LÓGICA DE SERIALIZACIÓN INTERNA ---
+    #             def limpiar_docs(obj):
+    #                 if isinstance(obj, list):
+    #                     return [limpiar_docs(item) for item in obj]
+    #                 if isinstance(obj, dict):
+    #                     return {k: limpiar_docs(v) for k, v in obj.items()}
+    #                 if isinstance(obj, ObjectId):
+    #                     return str(obj)
+    #                 if isinstance(obj, datetime):
+    #                     return obj.isoformat() # Opcional: convierte fechas a string ISO
+    #                 return obj
 
-                total_registros = resultado_raw["metadatos"][0]["total_registros"] if resultado_raw["metadatos"] else 0
-                datos_listos = limpiar_docs(resultado_raw["datos"])
+    #             total_registros = resultado_raw["metadatos"][0]["total_registros"] if resultado_raw["metadatos"] else 0
+    #             datos_listos = limpiar_docs(resultado_raw["datos"])
 
-                return {
-                    "paginacion": {
-                        "total_registros": total_registros,
-                        "total_paginas": (total_registros + limite - 1) // limite,
-                        "pagina_actual": pagina,
-                        "limite_por_pagina": limite
-                    },
-                    "resultados": datos_listos
-                }
+    #             return {
+    #                 "paginacion": {
+    #                     "total_registros": total_registros,
+    #                     "total_paginas": (total_registros + limite - 1) // limite,
+    #                     "pagina_actual": pagina,
+    #                     "limite_por_pagina": limite
+    #                 },
+    #                 "resultados": datos_listos
+    #             }
 
-            except Exception as e:
-                return {"error": str(e)}
+    #         except Exception as e:
+    #             return {"error": str(e)}
 
-
+    
 
     def get_total_valorizado(
         self,
