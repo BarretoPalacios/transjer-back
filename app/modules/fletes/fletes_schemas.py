@@ -56,6 +56,8 @@ class FleteFilter(BaseModel):
     monto_flete_max: Optional[float] = None
     fecha_creacion_desde: Optional[datetime] = None
     fecha_creacion_hasta: Optional[datetime] = None
+    fecha_servicio_desde: Optional[datetime] = None
+    fecha_servicio_hasta: Optional[datetime] = None
 
 # Schema para importación masiva
 class FleteImport(BaseModel):

@@ -500,6 +500,43 @@ def obtener_reporte_placas_facturadas(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @router.get("/total-fletes")
 def analisis_de_fletes(
     mes: Optional[int] = Query(None),
@@ -545,18 +582,17 @@ def obtener_resumen_financiero(
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))  
 
-@router.get("/resumen_proveedores")
-def resumen_proveedores(
-nombre_proveedor: Optional[str] = Query(None),
+@router.get("/obtener_fletes_por_fecha_servicio")
+def obtener_fletes_por_fecha_servicio(
             fecha_inicio: Optional[datetime] = Query(None),
             fecha_fin: Optional[datetime] = Query(None),
             pagina: int = Query(1, ge=1),
             limite: int = Query(20, ge=1, le=100),
-    gerencia_service: GerenciaService = Depends(get_gerencia_service),
+            gerencia_service: GerenciaService = Depends(get_gerencia_service),
 ):
     try:
         return gerencia_service.obtener_fletes_por_fecha_servicio(
-            nombre_proveedor=nombre_proveedor,
+          
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin,
             pagina=pagina,

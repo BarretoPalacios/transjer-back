@@ -149,6 +149,7 @@ class FleteService:
                 if filter_params.fecha_creacion_hasta:
                     query.setdefault("fecha_creacion", {})["$lte"] = filter_params.fecha_creacion_hasta
 
+                
             total = self.collection.count_documents(query)
             skip = (page - 1) * page_size
 

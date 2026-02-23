@@ -8,6 +8,9 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.utils import get_column_letter
 from bson import ObjectId
+from app.core.database import get_database
+from app.modules.fletes.fletes_services import FleteService
+from app.modules.fletes.fletes_schemas import FleteFilter
 
 logger = logging.getLogger(__name__)
 
@@ -21,91 +24,105 @@ class GerenciaService:
 
 
     def analisis_de_fletes(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
-        try:
-            pipeline = []
-
-            # 1. Filtro de fecha
-            if mes is not None and anio is not None:
-                mes, anio = int(mes), int(anio)
-                fecha_inicio = datetime(anio, mes, 1)
-                fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+            try:
+                pipeline = []
 
                 pipeline.append({
-                    "$match": {
-                        "fecha_creacion": {"$gte": fecha_inicio, "$lt": fecha_fin}
+                    "$lookup": {
+                        "from": "servicio_principal",
+                        "let": {"serv_id": "$servicio_id"},
+                        "pipeline": [
+                            {
+                                "$match": {
+                                    "$expr": {
+                                        "$eq": ["$_id", {"$toObjectId": "$$serv_id"}]
+                                    }
+                                }
+                            },
+                            {"$project": {"fecha_servicio": 1}}
+                        ],
+                        "as": "info_servicio"
                     }
                 })
 
-            # 2. Agrupación con CONTEOS específicos
-            pipeline.append({
-                "$group": {
-                    "_id": None,
-                    "conteo_total": {"$sum": 1},
-                    # Conteo y Monto Pendientes
-                    "cant_pendiente": {"$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}},
-                    "monto_pendiente": {
-                        "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]}
-                    },
-                    # Conteo y Monto Valorizados SIN Factura
-                    "cant_val_sin_fac": {
-                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, 1, 0]}
-                    },
-                    "monto_val_sin_fac": {
-                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, {"$toDouble": "$monto_flete"}, 0]}
-                    },
-                    # Conteo y Monto Valorizados CON Factura
-                    "cant_val_con_fac": {
-                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, 1, 0]}
-                    },
-                    "monto_val_con_fac": {
-                        "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, {"$toDouble": "$monto_flete"}, 0]}
-                    }
-                }
-            })
+                pipeline.append({"$unwind": "$info_servicio"})
 
-            # 3. Proyección para formatear resultados
-            pipeline.append({
-                "$project": {
-                    "_id": 0,
-                    "periodo": {"$literal": f"{mes}/{anio}" if mes else "HISTORICO TOTAL"},
-                    "conteo_total": 1,
-                    "detalles": {
-                        "pendientes": {
-                            "cantidad": "$cant_pendiente",
-                            "monto": {"$round": ["$monto_pendiente", 2]}
-                        },
-                        "valorizados_sin_factura": {
-                            "cantidad": "$cant_val_sin_fac",
-                            "monto": {"$round": ["$monto_val_sin_fac", 2]}
-                        },
-                        "valorizados_con_factura": {
-                            "cantidad": "$cant_val_con_fac",
-                            "monto": {"$round": ["$monto_val_con_fac", 2]}
+                if mes is not None and anio is not None:
+                    mes, anio = int(mes), int(anio)
+                    fecha_inicio = datetime(anio, mes, 1)
+                    fecha_fin = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
+
+                    pipeline.append({
+                        "$match": {
+                            "info_servicio.fecha_servicio": {"$gte": fecha_inicio, "$lt": fecha_fin}
                         }
-                    },
-                    "venta_total_valorizada": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
-                }
-            })
+                    })
 
-            resultado = list(self.fletes_collection.aggregate(pipeline))
+                pipeline.append({
+                    "$group": {
+                        "_id": None,
+                        "conteo_total": {"$sum": 1},
+                        "cant_pendiente": {"$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}},
+                        "monto_pendiente": {
+                            "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, {"$toDouble": "$monto_flete"}, 0]}
+                        },
+                        "cant_val_sin_fac": {
+                            "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, 1, 0]}
+                        },
+                        "monto_val_sin_fac": {
+                            "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", False]}]}, {"$toDouble": "$monto_flete"}, 0]}
+                        },
+                        "cant_val_con_fac": {
+                            "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, 1, 0]}
+                        },
+                        "monto_val_con_fac": {
+                            "$sum": {"$cond": [{"$and": [{"$eq": ["$estado_flete", "VALORIZADO"]}, {"$eq": ["$pertenece_a_factura", True]}]}, {"$toDouble": "$monto_flete"}, 0]}
+                        }
+                    }
+                })
 
-            if not resultado:
-                return {
-                    "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
-                    "conteo_total": 0,
-                    "detalles": {
-                        "pendientes": {"cantidad": 0, "monto": 0.0},
-                        "valorizados_sin_factura": {"cantidad": 0, "monto": 0.0},
-                        "valorizados_con_factura": {"cantidad": 0, "monto": 0.0}
-                    },
-                    "venta_total_valorizada": 0.0
-                }
+                pipeline.append({
+                    "$project": {
+                        "_id": 0,
+                        "periodo": {"$literal": f"{mes}/{anio}" if mes else "HISTORICO TOTAL"},
+                        "conteo_total": 1,
+                        "detalles": {
+                            "pendientes": {
+                                "cantidad": "$cant_pendiente",
+                                "monto": {"$round": ["$monto_pendiente", 2]}
+                            },
+                            "valorizados_sin_factura": {
+                                "cantidad": "$cant_val_sin_fac",
+                                "monto": {"$round": ["$monto_val_sin_fac", 2]}
+                            },
+                            "valorizados_con_factura": {
+                                "cantidad": "$cant_val_con_fac",
+                                "monto": {"$round": ["$monto_val_con_fac", 2]}
+                            }
+                        },
+                        "venta_total_valorizada": {"$round": [{"$add": ["$monto_val_sin_fac", "$monto_val_con_fac"]}, 2]}
+                    }
+                })
 
-            return resultado[0]
+                resultado = list(self.fletes_collection.aggregate(pipeline))
 
-        except Exception as e:
-            return {"error": str(e)}
+                if not resultado:
+                    return {
+                        "periodo": f"{mes}/{anio}" if mes else "HISTORICO TOTAL",
+                        "conteo_total": 0,
+                        "detalles": {
+                            "pendientes": {"cantidad": 0, "monto": 0.0},
+                            "valorizados_sin_factura": {"cantidad": 0, "monto": 0.0},
+                            "valorizados_con_factura": {"cantidad": 0, "monto": 0.0}
+                        },
+                        "venta_total_valorizada": 0.0
+                    }
 
+                return resultado[0]
+
+            except Exception as e:
+                return {"error": str(e)}
+                
     def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         try:
             pipeline = []
@@ -233,109 +250,103 @@ class GerenciaService:
             print(f"Error crítico en consolidación: {e}")
             return {"error": str(e)}
 
-    # no barrrar esta funcion ya que trae fletes y servicios a la vez 
-    # def obtener_fletes_por_fecha_servicio(
-    #         self, 
-    #         nombre_proveedor: Optional[str] = None, 
-    #         fecha_inicio: Optional[datetime] = None, 
-    #         fecha_fin: Optional[datetime] = None,
-    #         pagina: int = 1,
-    #         limite: int = 20
-    #     ) -> Dict[str, Any]:
-    #         try:
-    #             skip = (pagina - 1) * limite
-    #             pipeline = []
+    def obtener_fletes_por_fecha_servicio(
+            self, 
+            fecha_inicio: Optional[datetime] = None, 
+            fecha_fin: Optional[datetime] = None,
+            pagina: int = 1,
+            limite: int = 20
+        ) -> Dict[str, Any]:
+            try:
+                filtros = FleteFilter(
+                    fecha_servicio_desde=fecha_inicio,
+                    fecha_servicio_hasta=fecha_fin
+                )
 
-    #             # 1. Unir con servicio_principal primero para poder filtrar por su fecha
-    #             pipeline.append({
-    #                 "$lookup": {
-    #                     "from": "servicio_principal",
-    #                     "let": {"id_serv": "$servicio_id"},
-    #                     "pipeline": [
-    #                         {
-    #                             "$match": {
-    #                                 "$expr": {
-    #                                     "$eq": ["$_id", {"$toObjectId": "$$id_serv"}]
-    #                                 }
-    #                             }
-    #                         }
-    #                     ],
-    #                     "as": "detalle_servicio"
-    #                 }
-    #             })
+                db = get_database()
+                fletesService = FleteService(db)
 
-    #             # 2. Descomponer el array (importante para filtrar campos internos)
-    #             pipeline.append({"$unwind": "$detalle_servicio"})
+                resultado_fletes = fletesService.get_all_fletes(
+                    filter_params=filtros,
+                    page=pagina,
+                    page_size=limite
+                )
 
-    #             # 3. Filtros combinados: Fecha de Servicio y Proveedor
-    #             match_filters = {}
-    #             if fecha_inicio or fecha_fin:
-    #                 match_filters["detalle_servicio.fecha_servicio"] = {}
-    #                 if fecha_inicio:
-    #                     match_filters["detalle_servicio.fecha_servicio"]["$gte"] = fecha_inicio
-    #                 if fecha_fin:
-    #                     match_filters["detalle_servicio.fecha_servicio"]["$lte"] = fecha_fin
-
-    #             if nombre_proveedor:
-    #                 match_filters["detalle_servicio.proveedor.nombre"] = {
-    #                     "$regex": nombre_proveedor, 
-    #                     "$options": "i" 
-    #                 }
-
-    #             if match_filters:
-    #                 pipeline.append({"$match": match_filters})
-
-    #             # 4. Facet para conteo total y paginación
-    #             pipeline.append({
-    #                 "$facet": {
-    #                     "metadatos": [{"$count": "total_registros"}],
-    #                     "datos": [
-    #                         {"$sort": {"detalle_servicio.fecha_servicio": -1}},
-    #                         {"$skip": skip},
-    #                         {"$limit": limite},
-    #                         {
-    #                             "$project": {
-    #                                 "_id": 0,
-    #                                 "flete": "$$ROOT",
-    #                                 "servicio": "$detalle_servicio"
-    #                             }
-    #                         },
-    #                         {"$project": {"flete.detalle_servicio": 0}}
-    #                     ]
-    #                 }
-    #             })
-
-    #             resultado_raw = list(self.fletes_collection.aggregate(pipeline))[0]
+                resultados_combinados = []
                 
-    #             # --- LÓGICA DE SERIALIZACIÓN INTERNA ---
-    #             def limpiar_docs(obj):
-    #                 if isinstance(obj, list):
-    #                     return [limpiar_docs(item) for item in obj]
-    #                 if isinstance(obj, dict):
-    #                     return {k: limpiar_docs(v) for k, v in obj.items()}
-    #                 if isinstance(obj, ObjectId):
-    #                     return str(obj)
-    #                 if isinstance(obj, datetime):
-    #                     return obj.isoformat() # Opcional: convierte fechas a string ISO
-    #                 return obj
+                for item in resultado_fletes["items"]:
+                    servicio_id = item.get("servicio_id")
+                    detalle_servicio = {}
+                    
+                    if servicio_id:
+                        try:
+                            search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
+                            detalle_servicio = self.servicios_collection.find_one({"_id": search_id}) or {}
+                        except:
+                            detalle_servicio = {}
 
-    #             total_registros = resultado_raw["metadatos"][0]["total_registros"] if resultado_raw["metadatos"] else 0
-    #             datos_listos = limpiar_docs(resultado_raw["datos"])
+                    def serializar(obj):
+                        if isinstance(obj, ObjectId): return str(obj)
+                        if isinstance(obj, datetime): return obj.isoformat()
+                        if isinstance(obj, dict): return {k: serializar(v) for k, v in obj.items()}
+                        if isinstance(obj, list): return [serializar(i) for i in obj]
+                        return obj
 
-    #             return {
-    #                 "paginacion": {
-    #                     "total_registros": total_registros,
-    #                     "total_paginas": (total_registros + limite - 1) // limite,
-    #                     "pagina_actual": pagina,
-    #                     "limite_por_pagina": limite
-    #                 },
-    #                 "resultados": datos_listos
-    #             }
+                    resultados_combinados.append({
+                        "flete": serializar(item),
+                        "servicio": serializar(detalle_servicio)
+                    })
 
-    #         except Exception as e:
-    #             return {"error": str(e)}
+                return {
+                    "paginacion": {
+                        "total_registros": resultado_fletes["total"],
+                        "total_paginas": resultado_fletes["total_pages"],
+                        "pagina_actual": pagina,
+                        "limite_por_pagina": limite
+                    },
+                    "resultados": resultados_combinados
+                }
+
+            except Exception as e:
+                logger.error(f"Error en obtener_fletes_por_fecha_servicio: {str(e)}")
+                return {"error": str(e)}
 
     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def get_total_valorizado(
         self,
