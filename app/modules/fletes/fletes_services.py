@@ -621,9 +621,21 @@ class FleteService:
 
     def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
         try:
-            query = filter_params.copy() if filter_params else {}
+            query = {}
+            if filter_params:
+                # Si es un objeto de Pydantic o clase, convertir a dict
+                if hasattr(filter_params, "dict"):
+                    query = filter_params.dict(exclude_none=True)
+                elif isinstance(filter_params, dict):
+                    query = filter_params.copy()
+            
+            # 2. Extraer filtros especiales que no van directo a la query de fletes
             cliente_a_filtrar = query.pop("cliente_nombre", None)
+            
+            # Limpiar valores None para que MongoDB no busque literales "null"
+            query = {k: v for k, v in query.items() if v is not None}
 
+            # 3. Ejecutar búsqueda (si query está vacío {}, traerá todo)
             fletes = list(self.collection.find(query))
             
             excel_data = []
