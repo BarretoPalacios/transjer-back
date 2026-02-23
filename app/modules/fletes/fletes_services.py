@@ -307,10 +307,14 @@ class FleteService:
                 match_servicio["servicio.estado"] = estado_servicio
             
             if fecha_servicio_desde:
-                match_servicio.setdefault("servicio.fecha_servicio", {})["$gte"] = fecha_servicio_desde
-            
+                # Forzar inicio del día
+                desde = fecha_servicio_desde.replace(hour=0, minute=0, second=0, microsecond=0)
+                match_servicio.setdefault("servicio.fecha_servicio", {})["$gte"] = desde
+
             if fecha_servicio_hasta:
-                match_servicio.setdefault("servicio.fecha_servicio", {})["$lte"] = fecha_servicio_hasta
+                # Forzar fin del día
+                hasta = fecha_servicio_hasta.replace(hour=23, minute=59, second=59, microsecond=999999)
+                match_servicio.setdefault("servicio.fecha_servicio", {})["$lte"] = hasta
             
             if match_servicio:
                 pipeline.append({"$match": match_servicio})

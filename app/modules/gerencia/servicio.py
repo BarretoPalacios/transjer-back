@@ -122,7 +122,7 @@ class GerenciaService:
 
             except Exception as e:
                 return {"error": str(e)}
-                
+
     def analisis_de_facturas(self, mes: Optional[int] = None, anio: Optional[int] = None) -> Dict[str, Any]:
         try:
             pipeline = []
@@ -258,16 +258,13 @@ class GerenciaService:
             limite: int = 20
         ) -> Dict[str, Any]:
             try:
-                filtros = FleteFilter(
-                    fecha_servicio_desde=fecha_inicio,
-                    fecha_servicio_hasta=fecha_fin
-                )
-
+                
                 db = get_database()
                 fletesService = FleteService(db)
 
-                resultado_fletes = fletesService.get_all_fletes(
-                    filter_params=filtros,
+                resultado_fletes = fletesService.get_fletes_advanced(
+                    fecha_servicio_desde=fecha_inicio,
+                    fecha_servicio_hasta=fecha_fin,
                     page=pagina,
                     page_size=limite
                 )
