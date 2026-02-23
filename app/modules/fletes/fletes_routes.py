@@ -228,6 +228,8 @@ def exportar_fletes_excel(
     estado: Optional[str] = Query(None),
     pertenece_a_factura: Optional[bool] = Query(None),
     cliente_nombre:Optional[str] = Query(None),
+    fecha_servicio_desde: Optional[datetime] = Query(None),
+    fecha_servicio_hasta: Optional[datetime] = Query(None)
 ):
     try:
         db = get_database()
@@ -236,7 +238,9 @@ def exportar_fletes_excel(
         excel_file = fletesService.export_fletes_to_excel(filter_params={
             "estado_flete": estado, 
             "pertenece_a_factura": pertenece_a_factura,
-            "cliente_nombre": cliente_nombre
+            "cliente_nombre": cliente_nombre,
+            "fecha_servicio_desde": fecha_servicio_desde,
+            "fecha_servicio_hasta": fecha_servicio_hasta
             
             })
         

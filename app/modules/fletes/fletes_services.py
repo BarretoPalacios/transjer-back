@@ -628,19 +628,20 @@ class FleteService:
         try:
             query = {}
             if filter_params:
-                # Si es un objeto de Pydantic o clase, convertir a dict
                 if hasattr(filter_params, "dict"):
                     query = filter_params.dict(exclude_none=True)
                 elif isinstance(filter_params, dict):
                     query = filter_params.copy()
             
-            # 2. Extraer filtros especiales que no van directo a la query de fletes
+            # 1. Extraer filtros que pertenecen al SERVICIO y no al FLETE
             cliente_a_filtrar = query.pop("cliente_nombre", None)
+            fecha_desde = query.pop("fecha_servicio_desde", None)
+            fecha_hasta = query.pop("fecha_servicio_hasta", None)
             
-            # Limpiar valores None para que MongoDB no busque literales "null"
+            # Limpiar valores None para la query de fletes
             query = {k: v for k, v in query.items() if v is not None}
 
-            # 3. Ejecutar búsqueda (si query está vacío {}, traerá todo)
+            # 2. Ejecutar búsqueda en la colección de fletes
             fletes = list(self.collection.find(query))
             
             excel_data = []
@@ -656,11 +657,36 @@ class FleteService:
                     except:
                         srv = {}
 
-                nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
+                # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
                 
-                if cliente_a_filtrar:
-                    if cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
+                # A. Filtrar por Cliente
+                nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
+                if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
+                    continue
+
+                # B. Filtrar por Fechas de Servicio
+                # Obtenemos la fecha del servicio (puede venir como datetime o dict de Mongo)
+                f_srv = srv.get("fecha_servicio")
+                # Normalizar si viene como dict de Mongo {"$date": ...}
+                if isinstance(f_srv, dict) and "$date" in f_srv:
+                    f_srv = f_srv["$date"]
+                
+                if f_srv:
+                    # Si los filtros vienen como string ISO, convertirlos a datetime para comparar
+                    if isinstance(f_srv, str):
+                        from dateutil import parser
+                        f_srv = parser.parse(f_srv)
+                    
+                    # Validar rango (asumiendo que fecha_desde/hasta ya son objetos datetime o None)
+                    if fecha_desde and f_srv < fecha_desde:
                         continue
+                    if fecha_hasta and f_srv > fecha_hasta:
+                        continue
+                elif fecha_desde or fecha_hasta:
+                    # Si hay filtro de fecha pero el servicio no tiene fecha, lo saltamos
+                    continue
+
+                # --- FIN DE FILTRADO ---
 
                 conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
                 auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
