@@ -1093,6 +1093,13 @@ class ServicioPrincipalService:
     def obtener_analiticas_generales(self):
             pipeline = [
                 {
+                    # Normalizamos 'zona' y 'tipo_servicio' a minúsculas para evitar duplicados por escritura
+                    "$addFields": {
+                        "zona_normalizada": { "$toLower": "$zona" },
+                        "tipo_normalizado": { "$toLower": "$tipo_servicio" }
+                    }
+                },
+                {
                     "$facet": {
                         # 1. Resumen de Estados
                         "estados": [
@@ -1110,26 +1117,31 @@ class ServicioPrincipalService:
                             { "$sort": { "total": -1 } },
                             { "$limit": 5 }
                         ],
-                        # 4. Top 5 Conductores (Desglosando la lista de conductores)
+                        # 4. Top Conductores
                         "top_conductores": [
                             { "$unwind": "$conductor" },
                             { "$group": { "_id": "$conductor.nombre", "total": { "$sum": 1 } } },
                             { "$sort": { "total": -1 } },
                             { "$limit": 5 }
                         ],
-                        # 5. Estadísticas por Periodo (Mes)
+                        # 5. Servicios por Zona (Lima vs Provincia) - INSENSIBLE A MAYÚSCULAS
+                        "por_zona": [
+                            { 
+                                "$group": { 
+                                    "_id": "$zona_normalizada", 
+                                    "total": { "$sum": 1 } 
+                                } 
+                            }
+                        ],
+                        # 6. Estadísticas por Mes
                         "servicios_por_mes": [
                             { "$group": { "_id": "$mes", "total": { "$sum": 1 } } },
                             { "$sort": { "total": -1 } }
                         ],
-                        # 6. Top Modalidades
+                        # 7. Top Modalidades
                         "top_modalidades": [
                             { "$group": { "_id": "$modalidad_servicio", "total": { "$sum": 1 } } },
                             { "$sort": { "total": -1 } }
-                        ],
-                        # 7. Total Local vs Provincia
-                        "tipos_servicio": [
-                            { "$group": { "_id": "$tipo_servicio", "total": { "$sum": 1 } } }
                         ]
                     }
                 }
@@ -1142,9 +1154,11 @@ class ServicioPrincipalService:
 
             data = resultado[0]
 
-            # Formateo de datos rápidos
+            # Procesar los estados
             stats_estados = {item["_id"]: item["cantidad"] for item in data["estados"]}
-            stats_tipos = {item["_id"]: item["total"] for item in data["tipos_servicio"]}
+            
+            # Procesar las zonas (Lima/Provincia) unificando los nombres
+            stats_zonas = {item["_id"]: item["total"] for item in data["por_zona"]}
 
             return {
                 "resumen_general": {
@@ -1152,8 +1166,9 @@ class ServicioPrincipalService:
                     "programados": stats_estados.get("Programado", 0),
                     "cancelados": stats_estados.get("Cancelado", 0),
                     "completados": stats_estados.get("Completado", 0),
-                    "total_locales": stats_tipos.get("Local", 0),
-                    "total_provincia": stats_tipos.get("Nacional", 0)
+                    # Sumamos lima y LIMA en uno solo
+                    "total_lima": stats_zonas.get("lima", 0),
+                    "total_provincia": stats_zonas.get("provincia", 0)
                 },
                 "top_conductores": data["top_conductores"],
                 "top_clientes": data["top_clientes"],
