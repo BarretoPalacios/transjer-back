@@ -1153,7 +1153,7 @@ class ServicioPrincipalService:
                     "cancelados": stats_estados.get("Cancelado", 0),
                     "completados": stats_estados.get("Completado", 0),
                     "total_locales": stats_tipos.get("Local", 0),
-                    "total_provincia": stats_tipos.get("Provincia", 0)
+                    "total_provincia": stats_tipos.get("Nacional", 0)
                 },
                 "top_conductores": data["top_conductores"],
                 "top_clientes": data["top_clientes"],
@@ -1162,4 +1162,3 @@ class ServicioPrincipalService:
                 "servicios_por_mes": data["servicios_por_mes"]
             }
 
-            
