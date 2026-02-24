@@ -97,6 +97,7 @@ async def get_proveedores_list():
 
 @router.get("/placas-list")
 async def get_placas_list():
+    
     lista_estatica =  [
     "BVR-727" ,
     "CBB-773",
@@ -114,7 +115,12 @@ async def get_placas_list():
     "BJA-838",
     "F5F-264",
     "ARN-774"
-    #   "D7T-467",
-    #   "BNG-908"
     ]
-    return sorted(lista_estatica)
+
+    db = get_database()
+
+    colecc = db["flota"]
+
+    placas_db = colecc.distinct("placa")
+
+    return sorted(list(set(lista_estatica + placas_db)))
