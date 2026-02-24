@@ -393,6 +393,21 @@ def obtener_estadisticas_servicios_principales():
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
+
+@router.get("/stats/analiticas-generales")
+def obtener_analiticas_generales():
+    try:
+        db = get_database()
+        servicio_service = ServicioPrincipalService(db)
+        
+        analiticas = servicio_service.obtener_analiticas_generales()
+        return analiticas
+        
+    except Exception as e:
+        logger.error(f"Error al obtener analíticas generales: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
+
+
 @router.post("/cargar-excel-historico")
 async def cargar_excel_historico(
     archivo: UploadFile = File(..., description="Archivo Excel con servicios históricos")

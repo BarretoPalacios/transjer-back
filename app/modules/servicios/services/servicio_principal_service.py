@@ -1089,3 +1089,77 @@ class ServicioPrincipalService:
                     recomendaciones.append(f"Columna '{col}' tiene {porcentaje:.1f}% valores nulos")
         
         return recomendaciones
+
+    def obtener_analiticas_generales(self):
+            pipeline = [
+                {
+                    "$facet": {
+                        # 1. Resumen de Estados
+                        "estados": [
+                            { "$group": { "_id": "$estado", "cantidad": { "$sum": 1 } } }
+                        ],
+                        # 2. Top Clientes
+                        "top_clientes": [
+                            { "$group": { "_id": "$cliente.nombre", "total": { "$sum": 1 } } },
+                            { "$sort": { "total": -1 } },
+                            { "$limit": 5 }
+                        ],
+                        # 3. Top Placas
+                        "top_placas": [
+                            { "$group": { "_id": "$flota.placa", "total": { "$sum": 1 } } },
+                            { "$sort": { "total": -1 } },
+                            { "$limit": 5 }
+                        ],
+                        # 4. Top 5 Conductores (Desglosando la lista de conductores)
+                        "top_conductores": [
+                            { "$unwind": "$conductor" },
+                            { "$group": { "_id": "$conductor.nombre", "total": { "$sum": 1 } } },
+                            { "$sort": { "total": -1 } },
+                            { "$limit": 5 }
+                        ],
+                        # 5. Estadísticas por Periodo (Mes)
+                        "servicios_por_mes": [
+                            { "$group": { "_id": "$mes", "total": { "$sum": 1 } } },
+                            { "$sort": { "total": -1 } }
+                        ],
+                        # 6. Top Modalidades
+                        "top_modalidades": [
+                            { "$group": { "_id": "$modalidad_servicio", "total": { "$sum": 1 } } },
+                            { "$sort": { "total": -1 } }
+                        ],
+                        # 7. Total Local vs Provincia
+                        "tipos_servicio": [
+                            { "$group": { "_id": "$tipo_servicio", "total": { "$sum": 1 } } }
+                        ]
+                    }
+                }
+            ]
+
+            resultado = list(self.collection.aggregate(pipeline))
+            
+            if not resultado:
+                return None
+
+            data = resultado[0]
+
+            # Formateo de datos rápidos
+            stats_estados = {item["_id"]: item["cantidad"] for item in data["estados"]}
+            stats_tipos = {item["_id"]: item["total"] for item in data["tipos_servicio"]}
+
+            return {
+                "resumen_general": {
+                    "total_fletes": sum(stats_estados.values()),
+                    "programados": stats_estados.get("Programado", 0),
+                    "cancelados": stats_estados.get("Cancelado", 0),
+                    "completados": stats_estados.get("Completado", 0),
+                    "total_locales": stats_tipos.get("Local", 0),
+                    "total_provincia": stats_tipos.get("Provincia", 0)
+                },
+                "top_conductores": data["top_conductores"],
+                "top_clientes": data["top_clientes"],
+                "top_placas": data["top_placas"],
+                "top_modalidades": data["top_modalidades"],
+                "servicios_por_mes": data["servicios_por_mes"]
+            }
+
+            
