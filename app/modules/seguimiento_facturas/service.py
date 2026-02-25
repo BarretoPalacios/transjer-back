@@ -755,8 +755,8 @@ class FacturacionGestionService:
     def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
         """Exportar gestiones a Excel manejando múltiples fletes por gestión"""
         try:
-            query = self._build_query(filter_params)
-            gestiones = self._get_all_gestiones_sin_paginacion(query)
+            # query = self._build_query(filter_params)
+            gestiones = self._get_all_gestiones_sin_paginacion(filter_params)
             
             # 1. Definir columnas siempre para mantener consistencia
             columnas = [
