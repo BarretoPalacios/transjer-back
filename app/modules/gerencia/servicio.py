@@ -318,34 +318,6 @@ class GerenciaService:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def get_resumen_financiero_cliente(
         self,
         nombre_cliente: Optional[str] = None,

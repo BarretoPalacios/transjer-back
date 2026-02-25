@@ -206,7 +206,7 @@ class FacturacionGestionService:
         
         # Filtros de fechas - Servicio
         self._add_date_range_filter(
-            query, "datos_completos.fletes.servicio.fecha_servicio",
+            query, "datos_completos.fletes.0.servicio.fecha_servicio",
             filter_params.fecha_servicio_inicio,
             filter_params.fecha_servicio_fin
         )
