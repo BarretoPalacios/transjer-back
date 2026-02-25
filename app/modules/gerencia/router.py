@@ -582,21 +582,19 @@ def obtener_resumen_financiero(
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))  
 
-@router.get("/obtener_fletes_por_fecha_servicio")
-def obtener_fletes_por_fecha_servicio(
-            fecha_inicio: Optional[datetime] = Query(None),
-            fecha_fin: Optional[datetime] = Query(None),
-            pagina: int = Query(1, ge=1),
-            limite: int = Query(20, ge=1, le=100),
-            gerencia_service: GerenciaService = Depends(get_gerencia_service),
+
+
+@router.get("/analisis_de_fletes_por_cliente")
+def analisis_de_fletes_por_cliente(
+    fecha_inicio: Optional[datetime] = Query(None),
+    fecha_fin: Optional[datetime] = Query(None),
+    nombre_cliente: Optional[str] = Query(None),
+    
+    gerencia_service: GerenciaService = Depends(get_gerencia_service),
 ):
     try:
-        return gerencia_service.obtener_fletes_por_fecha_servicio(
-          
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            pagina=pagina,
-            limite=limite
+        return gerencia_service.analisis_de_fletes_por_cliente(
+            fecha_inicio, fecha_fin, nombre_cliente
         )
     except Exception as e:
         logger.error(f"Error: {str(e)}")
