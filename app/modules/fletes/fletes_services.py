@@ -17,6 +17,7 @@ class FleteService:
         self.db = db 
         self.collection = db["fletes"]
         self.servicios_collection = db["servicio_principal"]  # Colección de servicios
+        self.facturas_collection = db["facturacion"]
     
     def create_flete(self, flete_data: dict) -> dict:
         """Crear un nuevo flete con valores por defecto de facturación"""
@@ -526,69 +527,110 @@ class FleteService:
             return []
 
     # def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
-    #     """Exportar fletes vinculando datos detallados del servicio asociado"""
     #     try:
-    #         # 1. Obtener los fletes desde la colección
-    #         fletes = list(self.collection.find(filter_params or {}))
+    #         query = {}
+    #         if filter_params:
+    #             if hasattr(filter_params, "dict"):
+    #                 query = filter_params.dict(exclude_none=True)
+    #             elif isinstance(filter_params, dict):
+    #                 query = filter_params.copy()
             
-    #         if not fletes:
-    #             # Columnas mínimas para un archivo estructurado aunque esté vacío
-    #             df = pd.DataFrame(columns=["Código Flete", "Monto", "Cliente", "Estado"])
-    #         else:
-    #             excel_data = []
-    #             for flete in fletes:
-    #                 # 2. Buscar el servicio asociado
-    #                 servicio_id = flete.get("servicio_id")
-    #                 srv = {}
-                    
-    #                 if servicio_id:
-                        
-    #                     # Se busca en la colección de servicios configurada en tu clase
-    #                     srv = self.servicios_collection.find_one({"_id": ObjectId(servicio_id)}) or {}
+    #         # 1. Extraer filtros que pertenecen al SERVICIO y no al FLETE
+    #         cliente_a_filtrar = query.pop("cliente_nombre", None)
+    #         fecha_desde = query.pop("fecha_servicio_desde", None)
+    #         fecha_hasta = query.pop("fecha_servicio_hasta", None)
+            
+    #         # Limpiar valores None para la query de fletes
+    #         query = {k: v for k, v in query.items() if v is not None}
 
-    #                 # --- Procesamiento de Listas (Conductor/Auxiliar) ---
-    #                 conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
-    #                 auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
-                    
-    #                 # --- Procesamiento de Fechas (Formatos de MongoDB) ---
-    #                 def format_mongo_date(date_field):
-    #                     if isinstance(date_field, dict) and "$date" in date_field:
-    #                         return date_field["$date"]
-    #                     return date_field
-
-    #                 excel_data.append({
-    #                     "Código Flete": flete.get("codigo_flete", ""),
-    #                     "Monto Flete": float(flete.get("monto_flete", 0)),
-    #                     "Estado Flete": flete.get("estado_flete", ""),
-    #                     "Factura": flete.get("codigo_factura", "PENDIENTE"),
-    #                     "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
-                        
-    #                     # --- Datos del SERVICIO (Anidados) ---
-    #                     "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
-    #                     "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
-    #                     "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
-    #                     "Cliente": srv.get("cliente", {}).get("nombre", ""),
-    #                     "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
-    #                     "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
-    #                     "Placa": srv.get("flota", {}).get("placa", ""),
-    #                     "Conductor": conductor_info.get("nombre", ""),
-    #                     "Auxiliar": auxiliar_info.get("nombre", ""),
-    #                     "Origen": srv.get("origen", ""),
-    #                     "Destino": srv.get("destino", ""),
-    #                     "Zona": srv.get("zona", ""),
-    #                     "Tipo": srv.get("tipo_servicio", ""),
-    #                     "Modalidad Servicio": srv.get("modalidad_servicio", ""),
-    #                     "M3": srv.get("m3", ""),
-    #                     "TN": srv.get("tn", ""),
-    #                     "Guía RR": srv.get("gia_rr", ""),
-    #                     "Guía RT": srv.get("gia_rt", ""),
-    #                     "Estado Servicio": srv.get("estado", ""),
-    #                     "Observaciones": flete.get("observaciones", "")
-    #                 })
+    #         # 2. Ejecutar búsqueda en la colección de fletes
+    #         fletes = list(self.collection.find(query))
+            
+    #         excel_data = []
+            
+    #         for flete in fletes:
+    #             servicio_id = flete.get("servicio_id")
+    #             srv = {}
                 
+    #             if servicio_id:
+    #                 try:
+    #                     search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
+    #                     srv = self.servicios_collection.find_one({"_id": search_id}) or {}
+    #                 except:
+    #                     srv = {}
+
+    #             # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
+                
+    #             # A. Filtrar por Cliente
+    #             nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
+    #             if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
+    #                 continue
+
+    #             # B. Filtrar por Fechas de Servicio
+    #             # Obtenemos la fecha del servicio (puede venir como datetime o dict de Mongo)
+    #             f_srv = srv.get("fecha_servicio")
+    #             # Normalizar si viene como dict de Mongo {"$date": ...}
+    #             if isinstance(f_srv, dict) and "$date" in f_srv:
+    #                 f_srv = f_srv["$date"]
+                
+    #             if f_srv:
+    #                 # Si los filtros vienen como string ISO, convertirlos a datetime para comparar
+    #                 if isinstance(f_srv, str):
+    #                     from dateutil import parser
+    #                     f_srv = parser.parse(f_srv)
+                    
+    #                 # Validar rango (asumiendo que fecha_desde/hasta ya son objetos datetime o None)
+    #                 if fecha_desde and f_srv < fecha_desde:
+    #                     continue
+    #                 if fecha_hasta and f_srv > fecha_hasta:
+    #                     continue
+    #             elif fecha_desde or fecha_hasta:
+    #                 # Si hay filtro de fecha pero el servicio no tiene fecha, lo saltamos
+    #                 continue
+
+    #             # --- FIN DE FILTRADO ---
+
+    #             conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
+    #             auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
+                
+    #             def format_mongo_date(date_field):
+    #                 if isinstance(date_field, dict) and "$date" in date_field:
+    #                     return date_field["$date"]
+    #                 return date_field
+
+    #             excel_data.append({
+    #                 "Código Flete": flete.get("codigo_flete", ""),
+    #                 "Monto Flete": float(flete.get("monto_flete", 0)),
+    #                 "Estado Flete": flete.get("estado_flete", ""),
+    #                 "Factura": flete.get("codigo_factura", "PENDIENTE"),
+    #                 "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
+    #                 "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
+    #                 "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
+    #                 "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
+    #                 "Cliente": nombre_cliente_db,
+    #                 "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
+    #                 "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
+    #                 "Placa": srv.get("flota", {}).get("placa", ""),
+    #                 "Conductor": conductor_info.get("nombre", ""),
+    #                 "Auxiliar": auxiliar_info.get("nombre", ""),
+    #                 "Origen": srv.get("origen", ""),
+    #                 "Destino": srv.get("destino", ""),
+    #                 "Zona": srv.get("zona", ""),
+    #                 "Tipo": srv.get("tipo_servicio", ""),
+    #                 "Modalidad Servicio": srv.get("modalidad_servicio", ""),
+    #                 "M3": srv.get("m3", ""),
+    #                 "TN": srv.get("tn", ""),
+    #                 "Guía RR": srv.get("gia_rr", ""),
+    #                 "Guía RT": srv.get("gia_rt", ""),
+    #                 "Estado Servicio": srv.get("estado", ""),
+    #                 "Observaciones": flete.get("observaciones", "")
+    #             })
+            
+    #         if not excel_data:
+    #             df = pd.DataFrame(columns=["Código Flete", "Monto Flete", "Cliente", "Estado Flete"])
+    #         else:
     #             df = pd.DataFrame(excel_data)
 
-    #         # 3. Generación del Excel
     #         output = BytesIO()
     #         with pd.ExcelWriter(output, engine='openpyxl') as writer:
     #             df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
@@ -599,13 +641,11 @@ class FleteService:
     #             header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     #             header_font = Font(color="FFFFFF", bold=True)
                 
-    #             # Formatear cabecera
     #             for cell in worksheet[1]:
     #                 cell.fill = header_fill
     #                 cell.font = header_font
     #                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 
-    #             # Auto-ajuste inteligente de columnas
     #             for column in worksheet.columns:
     #                 max_length = 0
     #                 column_letter = column[0].column_letter
@@ -614,7 +654,6 @@ class FleteService:
     #                         if len(str(cell.value)) > max_length:
     #                             max_length = len(str(cell.value))
     #                     except: pass
-    #                 # Un poco de aire extra y límite de 50 para que no sea gigante
     #                 worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
 
     #         output.seek(0)
@@ -625,141 +664,145 @@ class FleteService:
     #         raise
 
     def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
-        try:
-            query = {}
-            if filter_params:
-                if hasattr(filter_params, "dict"):
-                    query = filter_params.dict(exclude_none=True)
-                elif isinstance(filter_params, dict):
-                    query = filter_params.copy()
-            
-            # 1. Extraer filtros que pertenecen al SERVICIO y no al FLETE
-            cliente_a_filtrar = query.pop("cliente_nombre", None)
-            fecha_desde = query.pop("fecha_servicio_desde", None)
-            fecha_hasta = query.pop("fecha_servicio_hasta", None)
-            
-            # Limpiar valores None para la query de fletes
-            query = {k: v for k, v in query.items() if v is not None}
+            try:
+                query = {}
+                if filter_params:
+                    if hasattr(filter_params, "dict"):
+                        query = filter_params.dict(exclude_none=True)
+                    elif isinstance(filter_params, dict):
+                        query = filter_params.copy()
+                
+                cliente_a_filtrar = query.pop("cliente_nombre", None)
+                fecha_desde = query.pop("fecha_servicio_desde", None)
+                fecha_hasta = query.pop("fecha_servicio_hasta", None)
+                
+                query = {k: v for k, v in query.items() if v is not None}
 
-            # 2. Ejecutar búsqueda en la colección de fletes
-            fletes = list(self.collection.find(query))
-            
-            excel_data = []
-            
-            for flete in fletes:
-                servicio_id = flete.get("servicio_id")
-                srv = {}
+                fletes = list(self.collection.find(query))
                 
-                if servicio_id:
-                    try:
-                        search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
-                        srv = self.servicios_collection.find_one({"_id": search_id}) or {}
-                    except:
-                        srv = {}
-
-                # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
+                excel_data = []
                 
-                # A. Filtrar por Cliente
-                nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
-                if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
-                    continue
-
-                # B. Filtrar por Fechas de Servicio
-                # Obtenemos la fecha del servicio (puede venir como datetime o dict de Mongo)
-                f_srv = srv.get("fecha_servicio")
-                # Normalizar si viene como dict de Mongo {"$date": ...}
-                if isinstance(f_srv, dict) and "$date" in f_srv:
-                    f_srv = f_srv["$date"]
-                
-                if f_srv:
-                    # Si los filtros vienen como string ISO, convertirlos a datetime para comparar
-                    if isinstance(f_srv, str):
-                        from dateutil import parser
-                        f_srv = parser.parse(f_srv)
-                    
-                    # Validar rango (asumiendo que fecha_desde/hasta ya son objetos datetime o None)
-                    if fecha_desde and f_srv < fecha_desde:
-                        continue
-                    if fecha_hasta and f_srv > fecha_hasta:
-                        continue
-                elif fecha_desde or fecha_hasta:
-                    # Si hay filtro de fecha pero el servicio no tiene fecha, lo saltamos
-                    continue
-
-                # --- FIN DE FILTRADO ---
-
-                conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
-                auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
-                
-                def format_mongo_date(date_field):
-                    if isinstance(date_field, dict) and "$date" in date_field:
-                        return date_field["$date"]
-                    return date_field
-
-                excel_data.append({
-                    "Código Flete": flete.get("codigo_flete", ""),
-                    "Monto Flete": float(flete.get("monto_flete", 0)),
-                    "Estado Flete": flete.get("estado_flete", ""),
-                    "Factura": flete.get("codigo_factura", "PENDIENTE"),
-                    "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
-                    "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
-                    "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
-                    "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
-                    "Cliente": nombre_cliente_db,
-                    "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
-                    "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
-                    "Placa": srv.get("flota", {}).get("placa", ""),
-                    "Conductor": conductor_info.get("nombre", ""),
-                    "Auxiliar": auxiliar_info.get("nombre", ""),
-                    "Origen": srv.get("origen", ""),
-                    "Destino": srv.get("destino", ""),
-                    "Zona": srv.get("zona", ""),
-                    "Tipo": srv.get("tipo_servicio", ""),
-                    "Modalidad Servicio": srv.get("modalidad_servicio", ""),
-                    "M3": srv.get("m3", ""),
-                    "TN": srv.get("tn", ""),
-                    "Guía RR": srv.get("gia_rr", ""),
-                    "Guía RT": srv.get("gia_rt", ""),
-                    "Estado Servicio": srv.get("estado", ""),
-                    "Observaciones": flete.get("observaciones", "")
-                })
-            
-            if not excel_data:
-                df = pd.DataFrame(columns=["Código Flete", "Monto Flete", "Cliente", "Estado Flete"])
-            else:
-                df = pd.DataFrame(excel_data)
-
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
-                
-                from openpyxl.styles import Font, PatternFill, Alignment
-                
-                worksheet = writer.sheets['Reporte Fletes']
-                header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True)
-                
-                for cell in worksheet[1]:
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
+                for flete in fletes:
+                    # --- BUSQUEDA DE SERVICIO ---
+                    servicio_id = flete.get("servicio_id")
+                    srv = {}
+                    if servicio_id:
                         try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except: pass
-                    worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
+                            search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
+                            srv = self.servicios_collection.find_one({"_id": search_id}) or {}
+                        except:
+                            srv = {}
 
-            output.seek(0)
-            return output
-            
-        except Exception as e:
-            logger.error(f"Error en export_fletes_to_excel: {str(e)}")
-            raise
+                    # --- NUEVA LÓGICA: BUSQUEDA DE FACTURA ---
+                    factura_id = flete.get("factura_id")
+                    num_factura_real = "PENDIENTE" # Valor por defecto
+                    
+                    if flete.get("pertenece_a_factura") and factura_id:
+                        try:
+                            f_id = ObjectId(factura_id) if isinstance(factura_id, str) else factura_id
+                            # Buscamos en la colección de facturas
+                            factura_doc = self.facturas_collection.find_one({"_id": f_id})
+                            if factura_doc:
+                                # Priorizamos 'numero_factura', si no existe usamos 'codigo_factura'
+                                num_factura_real = factura_doc.get("numero_factura", factura_doc.get("codigo_factura", ""))
+                        except Exception as e:
+                            logger.warning(f"Error buscando factura {factura_id}: {str(e)}")
+
+                    # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
+                    nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
+                    if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
+                        continue
+
+                    f_srv = srv.get("fecha_servicio")
+                    if isinstance(f_srv, dict) and "$date" in f_srv:
+                        f_srv = f_srv["$date"]
+                    
+                    if f_srv:
+                        if isinstance(f_srv, str):
+                            from dateutil import parser
+                            f_srv = parser.parse(f_srv)
+                        
+                        if fecha_desde and f_srv < fecha_desde:
+                            continue
+                        if fecha_hasta and f_srv > fecha_hasta:
+                            continue
+                    elif fecha_desde or fecha_hasta:
+                        continue
+
+                    # --- PROCESAMIENTO DE DATOS ---
+                    conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
+                    auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
+                    
+                    def format_mongo_date(date_field):
+                        if isinstance(date_field, dict) and "$date" in date_field:
+                            return date_field["$date"]
+                        return date_field
+
+                    excel_data.append({
+                        "Código Flete": flete.get("codigo_flete", ""),
+                        "Monto Flete": float(flete.get("monto_flete", 0)),
+                        "Estado Flete": flete.get("estado_flete", ""),
+                        # CAMBIO AQUÍ: Usamos la variable num_factura_real que obtuvimos arriba
+                        "Factura": num_factura_real, 
+                        "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
+                        "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
+                        "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
+                        "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
+                        "Cliente": nombre_cliente_db,
+                        "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
+                        "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
+                        "Placa": srv.get("flota", {}).get("placa", ""),
+                        "Conductor": conductor_info.get("nombre", ""),
+                        "Auxiliar": auxiliar_info.get("nombre", ""),
+                        "Origen": srv.get("origen", ""),
+                        "Destino": srv.get("destino", ""),
+                        "Zona": srv.get("zona", ""),
+                        "Tipo": srv.get("tipo_servicio", ""),
+                        "Modalidad Servicio": srv.get("modalidad_servicio", ""),
+                        "M3": srv.get("m3", ""),
+                        "TN": srv.get("tn", ""),
+                        "Guía RR": srv.get("gia_rr", ""),
+                        "Guía RT": srv.get("gia_rt", ""),
+                        "Estado Servicio": srv.get("estado", ""),
+                        "Observaciones": flete.get("observaciones", "")
+                    })
+                
+                # ... (el resto del código de pandas y openpyxl se mantiene igual)
+                if not excel_data:
+                    df = pd.DataFrame(columns=["Código Flete", "Monto Flete", "Cliente", "Estado Flete"])
+                else:
+                    df = pd.DataFrame(excel_data)
+
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    from openpyxl.styles import Font, PatternFill, Alignment
+
+                    df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
+                    # ... (lógica de estilos)
+                    worksheet = writer.sheets['Reporte Fletes']
+                    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                    header_font = Font(color="FFFFFF", bold=True)
+                    for cell in worksheet[1]:
+                        cell.fill = header_fill
+                        cell.font = header_font
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except: pass
+                        worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
+
+                output.seek(0)
+                return output
+                
+            except Exception as e:
+                logger.error(f"Error en export_fletes_to_excel: {str(e)}")
+                raise
+
 
 def safe_regex(value: str):
     if not value or not value.strip():
