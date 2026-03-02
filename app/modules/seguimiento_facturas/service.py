@@ -757,12 +757,13 @@ class FacturacionGestionService:
         try:
             query = self._build_query(filter_params)
             gestiones = self.collection.find(query)
+
             
             # 1. Definir columnas siempre para mantener consistencia
             columnas = [
                 "ID", "Código Factura", "Número Factura", "Fecha Emision", "Fecha Vencimiento", 
                 "Cliente", "Proveedor", "Placa", "Conductor", "Auxiliar", "Tipo Servicio", 
-                "Zona", "Fecha Servicio", "Origen", "Destino", "Estado Pago Neto", 
+                "Zona", "Fecha Servicio", "Origen", "Destino", "Monto Flete","Estado de Pago", 
                 "Estado Detracción", "Facturado Bruto", "Facturado con Detraccion", "Cobrado", 
                 "Saldo Pendiente", "Monto Detracción", "Tasa Det (%)", 
                 "Fecha De Pago", "Prioridad", "Responsable"
@@ -782,6 +783,7 @@ class FacturacionGestionService:
 
                     for flete in lista_fletes:
                         servicio = flete.get("servicio", {})
+                        m_flete = flete.get("monto_flete", Decimal("0"))
                         
                         excel_data.append({
                             "ID": gestion.get("id", ""),
@@ -799,7 +801,8 @@ class FacturacionGestionService:
                             "Fecha Servicio": servicio.get("fecha_servicio", ""),
                             "Origen": servicio.get("origen", ""),
                             "Destino": servicio.get("destino", ""),
-                            "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
+                            "Monto Flete": str(m_flete),
+                            "Estado de Pago": gestion.get("estado_pago_neto", ""),
                             "Estado Detracción": gestion.get("estado_detraccion", ""),
                             "Facturado Bruto": str(datos.get("monto_total", Decimal("0"))),
                             "Facturado con Detraccion": str(gestion.get("monto_neto", Decimal("0"))),

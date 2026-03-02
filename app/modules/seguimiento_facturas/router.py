@@ -389,28 +389,71 @@ def obtener_gestiones_por_vencer(
 @router.get("/export/excel")
 def exportar_gestiones_excel(
     # Filtros básicos
-    codigo_factura: Optional[str] = Query(None),
-    numero_factura: Optional[str] = Query(None),
-    estado_pago_neto: Optional[EstadoPagoNeto] = Query(None),
-    estado_detraccion: Optional[EstadoDetraccion] = Query(None),
-    prioridad: Optional[PrioridadPago] = Query(None),
-    centro_costo: Optional[str] = Query(None),
-    responsable_gestion: Optional[str] = Query(None),
+    codigo_factura: Optional[str] = Query(None, description="Código de factura"),
+    numero_factura: Optional[str] = Query(None, description="Número de factura"),
     
-    # Fechas
-    fecha_probable_inicio: Optional[date] = Query(None),
-    fecha_probable_fin: Optional[date] = Query(None),
-    fecha_emision_inicio: Optional[date] = Query(None),
-    fecha_emision_fin: Optional[date] = Query(None),
+    # Estados y prioridad
+    estado_detraccion: Optional[EstadoDetraccion] = Query(None, description="Estado de detracción"),
+    estado_pago_neto: Optional[EstadoPagoNeto] = Query(None, description="Estado de pago neto"),
+    prioridad: Optional[PrioridadPago] = Query(None, description="Prioridad"),
     
-    # Entidades
-    nombre_cliente: Optional[str] = Query(None),
-    nombre_proveedor: Optional[str] = Query(None),
-    placa_flota: Optional[str] = Query(None),
+    # Gestión administrativa
+    centro_costo: Optional[str] = Query(None, description="Centro de costo"),
+    responsable_gestion: Optional[str] = Query(None, description="Responsable"),
     
-    # Servicio
-    tipo_servicio: Optional[str] = Query(None),
-    zona: Optional[str] = Query(None),
+    # Fechas - Probable pago
+    fecha_probable_inicio: Optional[date] = Query(None, description="Fecha probable pago inicial"),
+    fecha_probable_fin: Optional[date] = Query(None, description="Fecha probable pago final"),
+    
+    # Fechas - Emisión
+    fecha_emision_inicio: Optional[date] = Query(None, description="Fecha emisión inicial"),
+    fecha_emision_fin: Optional[date] = Query(None, description="Fecha emisión final"),
+    
+    # Fechas - Vencimiento
+    fecha_vencimiento_inicio: Optional[date] = Query(None, description="Fecha vencimiento inicial"),
+    fecha_vencimiento_fin: Optional[date] = Query(None, description="Fecha vencimiento final"),
+    
+    # Fechas - Servicio
+    fecha_servicio_inicio: Optional[date] = Query(None, description="Fecha servicio inicial"),
+    fecha_servicio_fin: Optional[date] = Query(None, description="Fecha servicio final"),
+    
+    # Fechas - Pago detracción
+    fecha_pago_detraccion_inicio: Optional[date] = Query(None, description="Fecha pago detracción inicial"),
+    fecha_pago_detraccion_fin: Optional[date] = Query(None, description="Fecha pago detracción final"),
+    
+    # Filtros de entidades (snapshots)
+    nombre_cliente: Optional[str] = Query(None, description="Cliente"),
+    nombre_cuenta: Optional[str] = Query(None, description="Cuenta"),
+    nombre_proveedor: Optional[str] = Query(None, description="Proveedor"),
+    
+    # Filtros de flota y personal
+    placa_flota: Optional[str] = Query(None, description="Placa de vehículo"),
+    nombre_conductor: Optional[str] = Query(None, description="Conductor"),
+    nombre_auxiliar: Optional[str] = Query(None, description="Auxiliar"),
+    
+    # Filtros de servicio
+    tipo_servicio: Optional[str] = Query(None, description="Tipo de servicio"),
+    modalidad: Optional[str] = Query(None, description="Modalidad"),
+    zona: Optional[str] = Query(None, description="Zona"),
+    origen: Optional[str] = Query(None, description="Origen"),
+    destino: Optional[str] = Query(None, description="Destino"),
+    
+    # Filtros de montos
+    monto_total_min: Optional[Decimal] = Query(None, description="Monto total mínimo"),
+    monto_total_max: Optional[Decimal] = Query(None, description="Monto total máximo"),
+    monto_neto_min: Optional[Decimal] = Query(None, description="Monto neto mínimo"),
+    monto_neto_max: Optional[Decimal] = Query(None, description="Monto neto máximo"),
+    monto_detraccion_min: Optional[Decimal] = Query(None, description="Monto detracción mínimo"),
+    monto_detraccion_max: Optional[Decimal] = Query(None, description="Monto detracción máximo"),
+    
+    # Filtros de saldo
+    tiene_saldo_pendiente: Optional[bool] = Query(None, description="Tiene saldo pendiente"),
+    saldo_pendiente_min: Optional[Decimal] = Query(None, description="Saldo pendiente mínimo"),
+    saldo_pendiente_max: Optional[Decimal] = Query(None, description="Saldo pendiente máximo"),
+    
+    # Filtros de GIA
+    gia_rr: Optional[str] = Query(None, description="GIA RR"),
+    gia_rt: Optional[str] = Query(None, description="GIA RT"),
     
     # Búsqueda general
     search: Optional[str] = Query(None)
@@ -437,11 +480,34 @@ def exportar_gestiones_excel(
             fecha_probable_fin=fecha_probable_fin,
             fecha_emision_inicio=fecha_emision_inicio,
             fecha_emision_fin=fecha_emision_fin,
+            fecha_vencimiento_inicio=fecha_vencimiento_inicio,
+            fecha_vencimiento_fin=fecha_vencimiento_fin,
+            fecha_servicio_inicio=fecha_servicio_inicio,
+            fecha_servicio_fin=fecha_servicio_fin,
+            fecha_pago_detraccion_inicio=fecha_pago_detraccion_inicio,
+            fecha_pago_detraccion_fin=fecha_pago_detraccion_fin,
             nombre_cliente=nombre_cliente,
+            nombre_cuenta=nombre_cuenta,
             nombre_proveedor=nombre_proveedor,
             placa_flota=placa_flota,
+            nombre_conductor=nombre_conductor,
+            nombre_auxiliar=nombre_auxiliar,
             tipo_servicio=tipo_servicio,
+            modalidad=modalidad,
             zona=zona,
+            origen=origen,
+            destino=destino,
+            monto_total_min=monto_total_min,
+            monto_total_max=monto_total_max,
+            monto_neto_min=monto_neto_min,
+            monto_neto_max=monto_neto_max,
+            monto_detraccion_min=monto_detraccion_min,
+            monto_detraccion_max=monto_detraccion_max,
+            tiene_saldo_pendiente=tiene_saldo_pendiente,
+            saldo_pendiente_min=saldo_pendiente_min,
+            saldo_pendiente_max=saldo_pendiente_max,
+            gia_rr=gia_rr,
+            gia_rt=gia_rt,
             search=search
         )
         
