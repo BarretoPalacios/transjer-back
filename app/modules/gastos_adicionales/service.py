@@ -133,6 +133,15 @@ class GastoAdicionalService:
                         match_stage["codigo_gasto"] = safe_regex(filter_params.codigo_gasto)
                     if filter_params.tipo_gasto:
                         match_stage["tipo_gasto"] = safe_regex(filter_params.tipo_gasto)
+                    # Filtros de fecha
+                    if filter_params.fecha_inicio or filter_params.fecha_fin:
+                        fecha_query = {}
+                        if filter_params.fecha_inicio:
+                            fecha_query["$gte"] = filter_params.fecha_inicio
+                        if filter_params.fecha_fin:
+                            fecha_query["$lte"] = filter_params.fecha_fin
+                        if fecha_query:
+                            match_stage["fecha_gasto"] = fecha_query
                 
                 if match_stage:
                     pipeline.append({"$match": match_stage})
