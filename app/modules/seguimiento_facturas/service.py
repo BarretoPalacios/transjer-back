@@ -156,19 +156,18 @@ class FacturacionGestionService:
             raise
 
     def get_stats_gestiones(self, filter_params: Optional[FacturacionGestionFilter] = None) -> dict:
-        """Calcula totales monetarios y conteos basados en los filtros aplicados"""
+        """Calcula totales con redondeo a 2 decimales y omite facturas Anuladas"""
         try:
             query = self._build_query(filter_params)
-            today = datetime.now()
-
             query["estado_pago_neto"] = {"$ne": "Anulado"}
+            
+            today = datetime.now()
 
             pipeline = [
                 {"$match": query},
                 {
                     "$group": {
                         "_id": None,
-                        # --- TOTALES MONETARIOS ---
                         "monto_total_facturado": {"$sum": "$datos_completos.monto_total"},
                         "monto_total_pagado": {"$sum": "$monto_pagado_acumulado"},
                         "monto_total_detracciones": {"$sum": "$monto_detraccion"},
@@ -186,8 +185,7 @@ class FacturacionGestionService:
                                             {"$ne": ["$estado_pago_neto", "Pagado"]}
                                         ]
                                     },
-                                    "$datos_completos.monto_total",
-                                    0
+                                    "$monto_neto", 0
                                 ]
                             }
                         },
@@ -200,44 +198,37 @@ class FacturacionGestionService:
                                             {"$ne": ["$estado_pago_neto", "Pagado"]}
                                         ]
                                     },
-                                    "$datos_completos.monto_total",
-                                    0
+                                    "$monto_neto", 0
                                 ]
                             }
                         },
-                        # --- CONTEOS (Cantidades) ---
+                        # Conteos permanecen igual
                         "cant_total_facturas": {"$sum": 1},
                         "cant_facturas_vencidas": {
-                            "$sum": {
-                                "$cond": [
-                                    {
-                                        "$and": [
-                                            {"$lt": ["$datos_completos.fecha_vencimiento", today]},
-                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
-                                        ]
-                                    },
-                                    1, 0
-                                ]
-                            }
+                            "$sum": {"$cond": [{"$and": [{"$lt": ["$datos_completos.fecha_vencimiento", today]}, {"$ne": ["$estado_pago_neto", "Pagado"]}]}, 1, 0]}
                         },
                         "cant_facturas_por_vencer": {
-                            "$sum": {
-                                "$cond": [
-                                    {
-                                        "$and": [
-                                            {"$gte": ["$datos_completos.fecha_vencimiento", today]},
-                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
-                                        ]
-                                    },
-                                    1, 0
-                                ]
-                            }
+                            "$sum": {"$cond": [{"$and": [{"$gte": ["$datos_completos.fecha_vencimiento", today]}, {"$ne": ["$estado_pago_neto", "Pagado"]}]}, 1, 0]}
                         },
                         "cant_facturas_pagadas": {
-                            "$sum": {
-                                "$cond": [{"$eq": ["$estado_pago_neto", "Pagado"]}, 1, 0]
-                            }
+                            "$sum": {"$cond": [{"$eq": ["$estado_pago_neto", "Pagado"]}, 1, 0]}
                         }
+                    }
+                },
+                {
+                    # SEGUNDA ETAPA: Redondeo de todos los montos calculados
+                    "$project": {
+                        "_id": 0,
+                        "monto_total_facturado": {"$round": ["$monto_total_facturado", 2]},
+                        "monto_total_pagado": {"$round": ["$monto_total_pagado", 2]},
+                        "monto_total_detracciones": {"$round": ["$monto_total_detracciones", 2]},
+                        "monto_pagado_detracciones": {"$round": ["$monto_pagado_detracciones", 2]},
+                        "monto_total_vencido": {"$round": ["$monto_total_vencido", 2]},
+                        "monto_total_por_vencer": {"$round": ["$monto_total_por_vencer", 2]},
+                        "cant_total_facturas": 1,
+                        "cant_facturas_vencidas": 1,
+                        "cant_facturas_por_vencer": 1,
+                        "cant_facturas_pagadas": 1
                     }
                 }
             ]
@@ -253,12 +244,10 @@ class FacturacionGestionService:
                     "cant_facturas_por_vencer": 0, "cant_facturas_pagadas": 0
                 }
 
-            stats = result[0]
-            stats.pop("_id", None)
-            return stats
+            return result[0]
 
         except Exception as e:
-            logger.error(f"Error al calcular estadísticas completas: {str(e)}")
+            logger.error(f"Error al calcular estadísticas: {str(e)}")
             raise
 
     def _build_query(self, filter_params: Optional[FacturacionGestionFilter]) -> dict:
