@@ -455,213 +455,159 @@ class FleteService:
             logger.error(f"Error al obtener estadísticas: {str(e)}")
             return {}
 
-    def get_reporte_pendientes_por_cliente(self) -> List[Dict[str, Any]]:
+    # def get_reporte_pendientes_por_cliente(self) -> List[Dict[str, Any]]:
+    #     """
+    #     Reporte de montos totalizados por cliente consolidando por nombre
+    #     para evitar duplicados cuando el ID de cliente es nulo.
+    #     """
+    #     try:
+    #         pipeline = [
+    #             {
+    #                 # 1. Filtramos solo fletes valorizados que no están en una factura
+    #                 "$match": {
+    #                     "estado_flete": "VALORIZADO",
+    #                     "pertenece_a_factura": False
+    #                 }
+    #             },
+    #             {
+    #                 # 2. Cruce con la colección de servicios
+    #                 "$lookup": {
+    #                     "from": "servicio_principal",
+    #                     "let": {"serv_id": "$servicio_id"},
+    #                     "pipeline": [
+    #                         {
+    #                             "$match": {
+    #                                 "$expr": {
+    #                                     # Comparamos convirtiendo el string de fletes a ObjectId
+    #                                     "$eq": ["$_id", {"$toObjectId": "$$serv_id"}]
+    #                                 }
+    #                             }
+    #                         }
+    #                     ],
+    #                     "as": "info_servicio"
+    #                 }
+    #             },
+    #             {
+    #                 # 3. Aplanamos el array devuelto por el lookup
+    #                 "$unwind": "$info_servicio"
+    #             },
+    #             {
+    #                 # 4. AGRUPACIÓN CONSOLIDADA POR NOMBRE
+    #                 "$group": {
+    #                     # Agrupamos por nombre para evitar que IDs nulos separen al mismo cliente
+    #                     "_id": "$info_servicio.cliente.nombre", 
+    #                     "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
+    #                     "cliente_id": {"$first": "$info_servicio.cliente.id"},
+    #                     "monto_total_pendiente": {"$sum": "$monto_flete"},
+    #                     "cantidad_fletes": {"$sum": 1}
+    #                 }
+    #             },
+    #             {
+    #                 # 5. Ordenamos de mayor a menor deuda
+    #                 "$sort": {"monto_total_pendiente": -1}
+    #             },
+    #             {
+    #                 # 6. Limpiamos la salida para el frontend
+    #                 "$project": {
+    #                     "_id": 0,
+    #                     "cliente_id": 1,
+    #                     "nombre_cliente": 1,
+    #                     "monto_total_pendiente": 1,
+    #                     "cantidad_fletes": 1
+    #                 }
+    #             }
+    #         ]
+
+    #         # Ejecutamos la agregación y convertimos el cursor a lista
+    #         resultados = list(self.collection.aggregate(pipeline))
+    #         return resultados
+
+    #     except Exception as e:
+    #         logger.error(f"Error al generar reporte consolidado: {str(e)}")
+    #         return []
+
+    def get_reporte_pendientes_por_cliente(
+        self, 
+        nombre_cliente: Optional[str] = None,
+        fecha_servicio_desde: Optional[datetime] = None,
+        fecha_servicio_hasta: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Reporte de montos totalizados por cliente consolidando por nombre
-        para evitar duplicados cuando el ID de cliente es nulo.
+        Reporte consolidado filtrando por la fecha real del servicio y nombre de cliente.
         """
         try:
+            # 1. Filtro base: Solo fletes valorizados que no se han facturado aún
+            match_flete = {
+                "estado_flete": "VALORIZADO",
+                "pertenece_a_factura": False
+            }
+
+            # 2. Construcción dinámica del filtro de fecha para el servicio
+            # Buscamos en el campo 'fecha_servicio' dentro de la otra colección
+            filtro_fecha = {}
+            if fecha_servicio_desde or fecha_servicio_hasta:
+                filtro_fecha["fecha_servicio"] = {}
+                if fecha_servicio_desde:
+                    filtro_fecha["fecha_servicio"]["$gte"] = fecha_servicio_desde
+                if fecha_servicio_hasta:
+                    filtro_fecha["fecha_servicio"]["$lte"] = fecha_servicio_hasta
+
             pipeline = [
+                {"$match": match_flete},
                 {
-                    # 1. Filtramos solo fletes valorizados que no están en una factura
-                    "$match": {
-                        "estado_flete": "VALORIZADO",
-                        "pertenece_a_factura": False
-                    }
-                },
-                {
-                    # 2. Cruce con la colección de servicios
                     "$lookup": {
                         "from": "servicio_principal",
                         "let": {"serv_id": "$servicio_id"},
                         "pipeline": [
                             {
                                 "$match": {
-                                    "$expr": {
-                                        # Comparamos convirtiendo el string de fletes a ObjectId
-                                        "$eq": ["$_id", {"$toObjectId": "$$serv_id"}]
-                                    }
+                                    "$and": [
+                                        # Unión por ID
+                                        {"$expr": {"$eq": ["$_id", {"$toObjectId": "$$serv_id"}]}},
+                                        # Filtro de fecha de servicio
+                                        filtro_fecha if filtro_fecha else {}
+                                    ]
                                 }
                             }
                         ],
                         "as": "info_servicio"
                     }
                 },
+                # 3. Importante: Unwind elimina los fletes cuyo servicio no cumplió la fecha
+                {"$unwind": "$info_servicio"},
+                
+                # 4. Filtro por nombre de cliente (Opcional)
                 {
-                    # 3. Aplanamos el array devuelto por el lookup
-                    "$unwind": "$info_servicio"
+                    "$match": {
+                        "info_servicio.cliente.nombre": {
+                            "$regex": nombre_cliente, "$options": "i"
+                        } if nombre_cliente else {"$exists": True}
+                    }
                 },
                 {
-                    # 4. AGRUPACIÓN CONSOLIDADA POR NOMBRE
                     "$group": {
-                        # Agrupamos por nombre para evitar que IDs nulos separen al mismo cliente
                         "_id": "$info_servicio.cliente.nombre", 
                         "nombre_cliente": {"$first": "$info_servicio.cliente.nombre"},
-                        "cliente_id": {"$first": "$info_servicio.cliente.id"},
                         "monto_total_pendiente": {"$sum": "$monto_flete"},
                         "cantidad_fletes": {"$sum": 1}
                     }
                 },
                 {
-                    # 5. Ordenamos de mayor a menor deuda
-                    "$sort": {"monto_total_pendiente": -1}
-                },
-                {
-                    # 6. Limpiamos la salida para el frontend
                     "$project": {
                         "_id": 0,
-                        "cliente_id": 1,
                         "nombre_cliente": 1,
-                        "monto_total_pendiente": 1,
+                        "monto_total_pendiente": {"$round": ["$monto_total_pendiente", 2]},
                         "cantidad_fletes": 1
                     }
-                }
+                },
+                {"$sort": {"monto_total_pendiente": -1}}
             ]
 
-            # Ejecutamos la agregación y convertimos el cursor a lista
-            resultados = list(self.collection.aggregate(pipeline))
-            return resultados
+            return list(self.collection.aggregate(pipeline))
 
         except Exception as e:
-            logger.error(f"Error al generar reporte consolidado: {str(e)}")
+            logger.error(f"Error en reporte por fecha de servicio: {str(e)}")
             return []
-
-    # def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
-    #     try:
-    #         query = {}
-    #         if filter_params:
-    #             if hasattr(filter_params, "dict"):
-    #                 query = filter_params.dict(exclude_none=True)
-    #             elif isinstance(filter_params, dict):
-    #                 query = filter_params.copy()
-            
-    #         # 1. Extraer filtros que pertenecen al SERVICIO y no al FLETE
-    #         cliente_a_filtrar = query.pop("cliente_nombre", None)
-    #         fecha_desde = query.pop("fecha_servicio_desde", None)
-    #         fecha_hasta = query.pop("fecha_servicio_hasta", None)
-            
-    #         # Limpiar valores None para la query de fletes
-    #         query = {k: v for k, v in query.items() if v is not None}
-
-    #         # 2. Ejecutar búsqueda en la colección de fletes
-    #         fletes = list(self.collection.find(query))
-            
-    #         excel_data = []
-            
-    #         for flete in fletes:
-    #             servicio_id = flete.get("servicio_id")
-    #             srv = {}
-                
-    #             if servicio_id:
-    #                 try:
-    #                     search_id = ObjectId(servicio_id) if isinstance(servicio_id, str) else servicio_id
-    #                     srv = self.servicios_collection.find_one({"_id": search_id}) or {}
-    #                 except:
-    #                     srv = {}
-
-    #             # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
-                
-    #             # A. Filtrar por Cliente
-    #             nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
-    #             if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
-    #                 continue
-
-    #             # B. Filtrar por Fechas de Servicio
-    #             # Obtenemos la fecha del servicio (puede venir como datetime o dict de Mongo)
-    #             f_srv = srv.get("fecha_servicio")
-    #             # Normalizar si viene como dict de Mongo {"$date": ...}
-    #             if isinstance(f_srv, dict) and "$date" in f_srv:
-    #                 f_srv = f_srv["$date"]
-                
-    #             if f_srv:
-    #                 # Si los filtros vienen como string ISO, convertirlos a datetime para comparar
-    #                 if isinstance(f_srv, str):
-    #                     from dateutil import parser
-    #                     f_srv = parser.parse(f_srv)
-                    
-    #                 # Validar rango (asumiendo que fecha_desde/hasta ya son objetos datetime o None)
-    #                 if fecha_desde and f_srv < fecha_desde:
-    #                     continue
-    #                 if fecha_hasta and f_srv > fecha_hasta:
-    #                     continue
-    #             elif fecha_desde or fecha_hasta:
-    #                 # Si hay filtro de fecha pero el servicio no tiene fecha, lo saltamos
-    #                 continue
-
-    #             # --- FIN DE FILTRADO ---
-
-    #             conductor_info = srv.get("conductor", [{}])[0] if srv.get("conductor") else {}
-    #             auxiliar_info = srv.get("auxiliar", [{}])[0] if srv.get("auxiliar") else {}
-                
-    #             def format_mongo_date(date_field):
-    #                 if isinstance(date_field, dict) and "$date" in date_field:
-    #                     return date_field["$date"]
-    #                 return date_field
-
-    #             excel_data.append({
-    #                 "Código Flete": flete.get("codigo_flete", ""),
-    #                 "Monto Flete": float(flete.get("monto_flete", 0)),
-    #                 "Estado Flete": flete.get("estado_flete", ""),
-    #                 "Factura": flete.get("codigo_factura", "PENDIENTE"),
-    #                 "Fecha Creación": format_mongo_date(flete.get("fecha_creacion")),
-    #                 "Código Servicio": srv.get("codigo_servicio_principal", flete.get("codigo_servicio", "")),
-    #                 "Fecha Servicio": format_mongo_date(srv.get("fecha_servicio")),
-    #                 "Fecha Salida": format_mongo_date(srv.get("fecha_salida")),
-    #                 "Cliente": nombre_cliente_db,
-    #                 "RUC Cliente": srv.get("cliente", {}).get("ruc", ""),
-    #                 "Proveedor": srv.get("proveedor", {}).get("nombre", ""),
-    #                 "Placa": srv.get("flota", {}).get("placa", ""),
-    #                 "Conductor": conductor_info.get("nombre", ""),
-    #                 "Auxiliar": auxiliar_info.get("nombre", ""),
-    #                 "Origen": srv.get("origen", ""),
-    #                 "Destino": srv.get("destino", ""),
-    #                 "Zona": srv.get("zona", ""),
-    #                 "Tipo": srv.get("tipo_servicio", ""),
-    #                 "Modalidad Servicio": srv.get("modalidad_servicio", ""),
-    #                 "M3": srv.get("m3", ""),
-    #                 "TN": srv.get("tn", ""),
-    #                 "Guía RR": srv.get("gia_rr", ""),
-    #                 "Guía RT": srv.get("gia_rt", ""),
-    #                 "Estado Servicio": srv.get("estado", ""),
-    #                 "Observaciones": flete.get("observaciones", "")
-    #             })
-            
-    #         if not excel_data:
-    #             df = pd.DataFrame(columns=["Código Flete", "Monto Flete", "Cliente", "Estado Flete"])
-    #         else:
-    #             df = pd.DataFrame(excel_data)
-
-    #         output = BytesIO()
-    #         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-    #             df.to_excel(writer, index=False, sheet_name='Reporte Fletes')
-                
-    #             from openpyxl.styles import Font, PatternFill, Alignment
-                
-    #             worksheet = writer.sheets['Reporte Fletes']
-    #             header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-    #             header_font = Font(color="FFFFFF", bold=True)
-                
-    #             for cell in worksheet[1]:
-    #                 cell.fill = header_fill
-    #                 cell.font = header_font
-    #                 cell.alignment = Alignment(horizontal="center", vertical="center")
-                
-    #             for column in worksheet.columns:
-    #                 max_length = 0
-    #                 column_letter = column[0].column_letter
-    #                 for cell in column:
-    #                     try:
-    #                         if len(str(cell.value)) > max_length:
-    #                             max_length = len(str(cell.value))
-    #                     except: pass
-    #                 worksheet.column_dimensions[column_letter].width = min(max_length + 3, 50)
-
-    #         output.seek(0)
-    #         return output
-            
-    #     except Exception as e:
-    #         logger.error(f"Error en export_fletes_to_excel: {str(e)}")
-    #         raise
 
     def export_fletes_to_excel(self, filter_params = None) -> BytesIO:
             try:

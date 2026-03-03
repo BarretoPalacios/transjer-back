@@ -271,7 +271,11 @@ def obtener_estadisticas_fletes():
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @router.get("/stats/pendientes-facturacion")
-def obtener_pendientes_por_cliente():
+def obtener_pendientes_por_cliente(
+     nombre_cliente: Optional[str] = Query(None, description="Filtrar por nombre del cliente"),
+        fecha_servicio_desde: Optional[datetime] = Query(None, description="Filtrar por nombre del cliente"),
+        fecha_servicio_hasta: Optional[datetime] = Query(None, description="Filtrar por nombre del cliente")
+):
     """
     Reporte detallado de montos VALORIZADOS pendientes de facturación
     agrupados por cada cliente.
@@ -282,7 +286,11 @@ def obtener_pendientes_por_cliente():
         flete_service = FleteService(db)
         
         # 2. Llamada a la función de agregación que creamos
-        reporte = flete_service.get_reporte_pendientes_por_cliente()
+        reporte = flete_service.get_reporte_pendientes_por_cliente(
+            nombre_cliente=nombre_cliente,
+            fecha_servicio_desde=fecha_servicio_desde,
+            fecha_servicio_hasta=fecha_servicio_hasta
+        )
         
         # 3. Validación opcional por si el reporte viene vacío
         if not reporte:
