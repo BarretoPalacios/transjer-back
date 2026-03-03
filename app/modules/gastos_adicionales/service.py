@@ -116,94 +116,128 @@ class GastoAdicionalService:
             return None
     
     def get_all_gastos(
-        self,
-        filter_params: Optional[GastoAdicionalFilter] = None,
-        page: int = 1,
-        page_size: int = 10
-    ) -> dict:
-        """Obtener todos los gastos con filtros opcionales y paginación"""
-        try:
-            query = {}
+            self,
+            filter_params: Optional[GastoAdicionalFilter] = None,
+            page: int = 1,
+            page_size: int = 10
+        ) -> dict:
+            try:
+                pipeline = []
 
-            if filter_params:
-                if filter_params.id_flete:
-                    query["id_flete"] = safe_regex(filter_params.id_flete)
-
-                if filter_params.codigo_gasto:
-                    query["codigo_gasto"] = safe_regex(filter_params.codigo_gasto)
-
-                if filter_params.tipo_gasto:
-                    query["tipo_gasto"] = safe_regex(filter_params.tipo_gasto)
-
-                if filter_params.se_factura_cliente is not None:
-                    query["se_factura_cliente"] = filter_params.se_factura_cliente
-
-                if filter_params.estado_facturacion:
-                    query["estado_facturacion"] = filter_params.estado_facturacion
-
-                if filter_params.estado_aprobacion:
-                    query["estado_aprobacion"] = filter_params.estado_aprobacion
-
-                if filter_params.numero_factura:
-                    query["numero_factura"] = safe_regex(filter_params.numero_factura)
-
-                if filter_params.usuario_registro:
-                    query["usuario_registro"] = safe_regex(filter_params.usuario_registro)
-
-                # Filtros de fecha
-                if filter_params.fecha_inicio or filter_params.fecha_fin:
-                    fecha_query = {}
-                    if filter_params.fecha_inicio:
-                        fecha_query["$gte"] = filter_params.fecha_inicio
-                    if filter_params.fecha_fin:
-                        fecha_query["$lte"] = filter_params.fecha_fin
-                    if fecha_query:
-                        query["fecha_gasto"] = fecha_query
-
-            # Limpiar filtros nulos
-            query = {k: v for k, v in query.items() if v is not None}
-
-            total = self.collection.count_documents(query)
-            skip = (page - 1) * page_size
-
-            gastos = list(
-                self.collection.find(query)
-                .sort("fecha_gasto", -1)  # Más recientes primero
-                .skip(skip)
-                .limit(page_size)
-            )
-
-            for gasto in gastos:
-                gasto["id"] = str(gasto["_id"])
-                del gasto["_id"]
+                # 1. Filtros iniciales (Gastos)
+                match_stage = {}
+                if filter_params:
+                    if filter_params.id_flete:
+                        match_stage["id_flete"] = filter_params.id_flete
+                    if filter_params.codigo_gasto:
+                        match_stage["codigo_gasto"] = safe_regex(filter_params.codigo_gasto)
+                    if filter_params.tipo_gasto:
+                        match_stage["tipo_gasto"] = safe_regex(filter_params.tipo_gasto)
                 
-                # Asegurar que fecha_registro exista
-                if "fecha_registro" not in gasto:
-                    gasto["fecha_registro"] = datetime.now()
+                if match_stage:
+                    pipeline.append({"$match": match_stage})
+
+                # 2. Unión con Fletes (Asegurando conversión de ID)
+                pipeline.extend([
+                    {
+                        "$addFields": {
+                            "flete_id_obj": {
+                                "$cond": {
+                                    "if": { "$eq": [{ "$strLenCP": "$id_flete" }, 24] },
+                                    "then": { "$toObjectId": "$id_flete" },
+                                    "else": "$id_flete"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "fletes",
+                            "localField": "flete_id_obj",
+                            "foreignField": "_id",
+                            "as": "flete_info"
+                        }
+                    },
+                    # Usamos preserveNullAndEmptyArrays: True para debuguear si el flete no existe
+                    {"$unwind": {"path": "$flete_info", "preserveNullAndEmptyArrays": True}}
+                ])
+
+                # 3. Unión con Servicio Principal
+                pipeline.extend([
+                    {
+                        "$addFields": {
+                            "serv_id_obj": {
+                                "$cond": {
+                                    "if": { "$eq": [{ "$strLenCP": { "$ifNull": ["$flete_info.servicio_id", ""] } }, 24] },
+                                    "then": { "$toObjectId": "$flete_info.servicio_id" },
+                                    "else": "$flete_info.servicio_id"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "servicio_principal",
+                            "localField": "serv_id_obj",
+                            "foreignField": "_id",
+                            "as": "servicio_info"
+                        }
+                    },
+                    {"$unwind": {"path": "$servicio_info", "preserveNullAndEmptyArrays": True}}
+                ])
+
+                # 4. Filtro por nombre de cliente
+                if filter_params and filter_params.cliente:
+                    # El filtro debe ser estricto aquí
+                    pipeline.append({
+                        "$match": {
+                            "servicio_info.cliente.nombre": safe_regex(filter_params.cliente)
+                        }
+                    })
+
+                # 5. Paginación
+                skip = (page - 1) * page_size
+                pipeline.append({
+                    "$facet": {
+                        "metadata": [{"$count": "total"}],
+                        "data": [
+                            {"$sort": {"fecha_gasto": -1}},
+                            {"$skip": skip},
+                            {"$limit": page_size}
+                        ]
+                    }
+                })
+
+                full_result = list(self.collection.aggregate(pipeline))
                 
-                # Asegurar que fecha_registro exista
-                if "fecha_registro" not in gasto:
-                    gasto["fecha_registro"] = datetime.now()
+                if not full_result or not full_result[0]["data"]:
+                    return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+
+                result_data = full_result[0]
+                total = result_data["metadata"][0]["total"] if result_data["metadata"] else 0
                 
-                # Asegurar que fecha_registro exista
-                if "fecha_registro" not in gasto:
-                    gasto["fecha_registro"] = datetime.now()
+                final_items = []
+                for item in result_data["data"]:
+                    item["id"] = str(item["_id"])
+                    # Mapeamos datos útiles del servicio para el frontend
+                    item["cliente_nombre"] = item.get("servicio_info", {}).get("cliente", {}).get("nombre", "N/A")
+                    item["codigo_servicio"] = item.get("servicio_info", {}).get("codigo_servicio_principal", "N/A")
+                    
+                    # Limpieza de campos de proceso
+                    for k in ["_id", "flete_info", "servicio_info", "flete_id_obj", "serv_id_obj"]:
+                        item.pop(k, None)
+                    final_items.append(item)
 
-            total_pages = ceil(total / page_size) if page_size > 0 else 0
+                return {
+                    "items": final_items,
+                    "total": total,
+                    "page": page,
+                    "total_pages": ceil(total / page_size) if page_size > 0 else 0
+                }
 
-            return {
-                "items": gastos,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_prev": page > 1
-            }
-
-        except Exception as e:
-            logger.error(f"Error al obtener gastos: {str(e)}")
-            raise
+            except Exception as e:
+                print(f"DEBUG ERROR: {str(e)}") # Mira esto en tu consola
+                raise
     
     def update_gasto(self, gasto_id: str, update_data: dict) -> Optional[dict]:
         """Actualizar gasto"""

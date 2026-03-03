@@ -66,6 +66,7 @@ class GastoAdicionalFilter(BaseModel):
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
     numero_factura: Optional[str] = None
+    cliente: Optional[str] = None 
 
 # ==========================================
 # Paginación y Respuestas Masivas

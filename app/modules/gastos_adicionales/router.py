@@ -33,7 +33,7 @@ def crear_gasto(gasto: GastoAdicionalCreate):
         logger.error(f"Error al crear gasto adicional: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-@router.get("/", response_model=PaginatedResponse[GastoAdicionalResponse])
+@router.get("/")
 def listar_gastos(
     page: int = Query(default=1, ge=1, description="Número de página"),
     page_size: int = Query(default=10, ge=1, le=100, description="Elementos por página"),
@@ -46,7 +46,8 @@ def listar_gastos(
     usuario_registro: Optional[str] = Query(None, description="Filtrar por usuario que registró"),
     numero_factura: Optional[str] = Query(None, description="Filtrar por numero de factura"),
     fecha_inicio: Optional[datetime] = Query(None, description="Filtrar por fecha inicio"),
-    fecha_fin: Optional[datetime] = Query(None, description="Filtrar por fecha fin")
+    fecha_fin: Optional[datetime] = Query(None, description="Filtrar por fecha fin"),
+    cliente: Optional[str] = Query(None, description="Filtrar por cliente")
 ):
     try:
         db = get_database()
@@ -62,7 +63,8 @@ def listar_gastos(
             usuario_registro=usuario_registro,
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin,
-            numero_factura=numero_factura
+            numero_factura=numero_factura,
+            cliente=cliente
         )
         
         result = gasto_service.get_all_gastos(filter_params, page, page_size)
