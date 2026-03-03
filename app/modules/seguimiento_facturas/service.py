@@ -123,6 +123,8 @@ class FacturacionGestionService:
         """Obtener todas las gestiones con filtros extendidos y paginación"""
         try:
             query = self._build_query(filter_params)
+
+            stats = self.get_stats_gestiones(filter_params)
             
             total = self.collection.count_documents(query)
             skip = (page - 1) * page_size
@@ -140,6 +142,7 @@ class FacturacionGestionService:
             
             return {
                 "items": formatted_gestiones,
+                "stats": stats,
                 "total": total,
                 "page": page,
                 "page_size": page_size,
@@ -151,7 +154,111 @@ class FacturacionGestionService:
         except Exception as e:
             logger.error(f"Error al obtener gestiones: {str(e)}")
             raise
-    
+
+    def get_stats_gestiones(self, filter_params: Optional[FacturacionGestionFilter] = None) -> dict:
+        """Calcula totales monetarios y conteos basados en los filtros aplicados"""
+        try:
+            query = self._build_query(filter_params)
+            today = datetime.now()
+
+            pipeline = [
+                {"$match": query},
+                {
+                    "$group": {
+                        "_id": None,
+                        # --- TOTALES MONETARIOS ---
+                        "monto_total_facturado": {"$sum": "$datos_completos.monto_total"},
+                        "monto_total_pagado": {"$sum": "$monto_pagado_acumulado"},
+                        "monto_total_detracciones": {"$sum": "$monto_detraccion"},
+                        "monto_pagado_detracciones": {
+                            "$sum": {
+                                "$cond": [{"$eq": ["$estado_detraccion", "Pagado"]}, "$monto_detraccion", 0]
+                            }
+                        },
+                        "monto_total_vencido": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$lt": ["$datos_completos.fecha_vencimiento", today]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                        ]
+                                    },
+                                    "$datos_completos.monto_total",
+                                    0
+                                ]
+                            }
+                        },
+                        "monto_total_por_vencer": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$gte": ["$datos_completos.fecha_vencimiento", today]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                        ]
+                                    },
+                                    "$datos_completos.monto_total",
+                                    0
+                                ]
+                            }
+                        },
+                        # --- CONTEOS (Cantidades) ---
+                        "cant_total_facturas": {"$sum": 1},
+                        "cant_facturas_vencidas": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$lt": ["$datos_completos.fecha_vencimiento", today]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                        ]
+                                    },
+                                    1, 0
+                                ]
+                            }
+                        },
+                        "cant_facturas_por_vencer": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$gte": ["$datos_completos.fecha_vencimiento", today]},
+                                            {"$ne": ["$estado_pago_neto", "Pagado"]}
+                                        ]
+                                    },
+                                    1, 0
+                                ]
+                            }
+                        },
+                        "cant_facturas_pagadas": {
+                            "$sum": {
+                                "$cond": [{"$eq": ["$estado_pago_neto", "Pagado"]}, 1, 0]
+                            }
+                        }
+                    }
+                }
+            ]
+
+            result = list(self.collection.aggregate(pipeline))
+            
+            if not result:
+                return {
+                    "monto_total_facturado": 0, "monto_total_pagado": 0,
+                    "monto_total_detracciones": 0, "monto_pagado_detracciones": 0,
+                    "monto_total_vencido": 0, "monto_total_por_vencer": 0,
+                    "cant_total_facturas": 0, "cant_facturas_vencidas": 0,
+                    "cant_facturas_por_vencer": 0, "cant_facturas_pagadas": 0
+                }
+
+            stats = result[0]
+            stats.pop("_id", None)
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error al calcular estadísticas completas: {str(e)}")
+            raise
+
     def _build_query(self, filter_params: Optional[FacturacionGestionFilter]) -> dict:
         """Construir query de MongoDB con todos los filtros"""
         query = {}
@@ -662,95 +769,6 @@ class FacturacionGestionService:
             print(f"Error en dashboard: {e}")
             return {}
 
-    # def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
-    #     """Exportar gestiones a Excel con datos completos de snapshots"""
-    #     try:
-    #         gestiones = self._get_all_gestiones_sin_paginacion(filter_params)
-            
-    #         if not gestiones:
-    #             df = pd.DataFrame(columns=[
-    #                 "ID", "Código Factura", "Número Factura","Fecha Emision","Fecha Vencimiento", "Cliente", "Proveedor",
-    #                 "Placa", "Conductor", "Auxiliar", "Tipo Servicio", "Zona",
-    #                 "Fecha Servicio", "Origen", "Destino",
-    #                 "Estado Pago Neto", "Estado Detracción",
-    #                 "Monto Total", "Monto Neto", "Monto Pagado", "Saldo Pendiente",
-    #                 "Monto Detracción", "Tasa Detracción (%)",
-    #                 "Fecha Probable Pago", "Prioridad", "Responsable"
-    #             ])
-    #         else:
-    #             excel_data = []
-    #             for gestion in gestiones:
-    #                 # Extraer datos de snapshot si existen
-    #                 datos = gestion.get("datos_completos", {})
-    #                 flete = datos.get("fletes", [{}])[0] if datos.get("fletes") else {}
-    #                 servicio = flete.get("servicio", {})
-                    
-    #                 excel_data.append({
-    #                     "ID": gestion.get("id", ""),
-    #                     "Código Factura": gestion.get("codigo_factura", ""),
-    #                     "Número Factura": datos.get("numero_factura", ""),
-    #                     "Fecha Emision": datos.get("fecha_emision", ""),
-    #                     "Fecha Vencimiento": datos.get("fecha_vencimiento", ""),
-    #                     "Cliente": servicio.get("nombre_cliente", ""),
-    #                     "Proveedor": servicio.get("nombre_proveedor", ""),
-    #                     "Placa": servicio.get("placa_flota", ""),
-    #                     "Conductor": servicio.get("nombre_conductor", ""),
-    #                     "Auxiliar": servicio.get("nombre_auxiliar", ""),
-    #                     "Tipo Servicio": servicio.get("tipo_servicio", ""),
-    #                     "Zona": servicio.get("zona", ""),
-    #                     "Fecha Servicio": servicio.get("fecha_servicio", ""),
-    #                     "Origen": servicio.get("origen", ""),
-    #                     "Destino": servicio.get("destino", ""),
-    #                     "Estado Pago Neto": gestion.get("estado_pago_neto", ""),
-    #                     "Estado Detracción": gestion.get("estado_detraccion", ""),
-    #                     "Monto Total": str(datos.get("monto_total", Decimal("0"))),
-    #                     "Monto Neto": str(gestion.get("monto_neto", Decimal("0"))),
-    #                     "Monto Pagado": str(gestion.get("monto_pagado_acumulado", Decimal("0"))),
-    #                     "Saldo Pendiente": str(gestion.get("saldo_pendiente", Decimal("0"))),
-    #                     "Monto Detracción": str(gestion.get("monto_detraccion", Decimal("0"))),
-    #                     "Tasa Detracción (%)": str(gestion.get("tasa_detraccion", Decimal("4.0"))),
-    #                     "Fecha Probable Pago": gestion.get("fecha_probable_pago", ""),
-    #                     "Prioridad": gestion.get("prioridad", ""),
-    #                     "Responsable": gestion.get("responsable_gestion", "")
-    #                 })
-                
-    #             df = pd.DataFrame(excel_data)
-            
-    #         output = BytesIO()
-    #         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-    #             df.to_excel(writer, index=False, sheet_name='Gestión Facturación')
-                
-    #             from openpyxl.styles import Font, PatternFill, Alignment
-                
-    #             workbook = writer.book
-    #             worksheet = writer.sheets['Gestión Facturación']
-                
-    #             header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    #             header_font = Font(color="FFFFFF", bold=True)
-                
-    #             for cell in worksheet[1]:
-    #                 cell.fill = header_fill
-    #                 cell.font = header_font
-    #                 cell.alignment = Alignment(horizontal="center", vertical="center")
-                
-    #             for column in worksheet.columns:
-    #                 max_length = 0
-    #                 column_letter = column[0].column_letter
-    #                 for cell in column:
-    #                     try:
-    #                         if len(str(cell.value)) > max_length:
-    #                             max_length = len(str(cell.value))
-    #                     except:
-    #                         pass
-    #                 adjusted_width = min(max_length + 2, 50)
-    #                 worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-    #         output.seek(0)
-    #         return output
-            
-    #     except Exception as e:
-    #         logger.error(f"Error al exportar a Excel: {str(e)}")
-    #         raise
     
     def export_to_excel(self, filter_params: Optional[FacturacionGestionFilter] = None) -> BytesIO:
         """Exportar gestiones a Excel manejando múltiples fletes por gestión"""

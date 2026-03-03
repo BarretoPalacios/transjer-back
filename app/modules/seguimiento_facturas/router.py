@@ -48,7 +48,7 @@ def crear_gestion(gestion: FacturacionGestionCreate):
         logger.error(f"Error al crear gestión: {str(e)}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-@router.get("/", response_model=PaginatedResponse[FacturacionGestionResponse])
+@router.get("/")
 def listar_gestiones(
     # Parámetros de paginación
     page: int = Query(default=1, ge=1, description="Número de página"),
@@ -323,16 +323,7 @@ def registrar_pago_parcial(
 
 @router.get("/dashboard/estadisticas")
 def obtener_estadisticas_dashboard():
-    """
-    Obtener estadísticas para el dashboard
-    
-    Retorna métricas clave para el seguimiento de facturas:
-    - Totales por estado de pago
-    - Totales por estado de detracción
-    - Distribución por prioridad
-    - Montos totales (neto, pagado, detracción, pendiente)
-    - Cantidad de gestiones vencidas
-    """
+
     try:
         db = get_database()
         gestion_service = FacturacionGestionService(db)

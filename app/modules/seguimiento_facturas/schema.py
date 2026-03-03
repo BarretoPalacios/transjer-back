@@ -216,6 +216,7 @@ class SummaryKpis(BaseModel):
 class FacturacionGestionSummaryResponse(BaseModel):
     summary: SummaryKpis  # <--- Aquí están los totales para las tarjetas del Dashboard
     items: List[FacturacionGestionResponse] # <--- La lista para la tabla
+    stats: Optional[dict] = None
     total: int
     page: int
     page_size: int
