@@ -161,6 +161,8 @@ class FacturacionGestionService:
             query = self._build_query(filter_params)
             today = datetime.now()
 
+            query["estado_pago_neto"] = {"$ne": "Anulado"}
+
             pipeline = [
                 {"$match": query},
                 {
