@@ -710,7 +710,8 @@ class FleteService:
                         "Guía RR": srv.get("gia_rr", ""),
                         "Guía RT": srv.get("gia_rt", ""),
                         "Estado Servicio": srv.get("estado", ""),
-                        "Observaciones": flete.get("observaciones", "")
+                        "Observaciones": flete.get("observaciones", ""),
+                        "Descripcion":srv.get("descripcion", "")
                     })
                 
                 # ... (el resto del código de pandas y openpyxl se mantiene igual)
