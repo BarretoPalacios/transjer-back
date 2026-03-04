@@ -25,6 +25,7 @@ from app.modules.seguimiento_facturas.router import router as seguimiento_factur
 from app.modules.gastos_adicionales.router import router as gasto_router
 from app.modules.gastos.router import router as gasto
 from app.modules.gerencia.router import router as gerencia
+from app.modules.monitoreo.router import router as monitoreo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sistema-operador-logistico")
@@ -51,6 +52,8 @@ def create_app() -> FastAPI:
 
     app.include_router(facturacion_router,dependencies=[Depends(get_current_user)])
     app.include_router(seguimiento_facturas_router,dependencies=[Depends(get_current_user)])
+
+    app.include_router(monitoreo,dependencies=[Depends(get_current_user)])
 
     app.include_router(historico_router,dependencies=[Depends(get_current_user)])
     app.include_router(gasto_router,dependencies=[Depends(get_current_user)])
