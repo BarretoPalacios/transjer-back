@@ -287,15 +287,8 @@ class MonitoreoGerencia:
         fecha_servicio_desde: Optional[datetime] = None,
         fecha_servicio_hasta: Optional[datetime] = None
     ):
-        """
-        Reporte consolidado de fletes agrupado por placa.
-        Aplica para todos los fletes (no filtra por estado ni facturación).
-        """
         try:
-            # Filtro base vacío — todos los fletes
-            match_flete = {}
-
-            # Filtro de fecha para el servicio
+            # 1. Filtro base de fecha
             filtro_fecha = {}
             if fecha_servicio_desde or fecha_servicio_hasta:
                 filtro_fecha["fecha_servicio"] = {}
@@ -305,7 +298,7 @@ class MonitoreoGerencia:
                     filtro_fecha["fecha_servicio"]["$lte"] = fecha_servicio_hasta
 
             pipeline = [
-                {"$match": match_flete},
+                # Traemos la información del servicio
                 {
                     "$lookup": {
                         "from": "servicio_principal",
@@ -323,41 +316,59 @@ class MonitoreoGerencia:
                         "as": "info_servicio"
                     }
                 },
-                # Elimina fletes cuyo servicio no cumplió el filtro de fecha
                 {"$unwind": "$info_servicio"},
 
-                # Filtro opcional por placa
+                # 2. PROYECCIÓN INTERMEDIA: Normalizamos la placa para agrupar correctamente
                 {
-                    "$match": {
-                        "info_servicio.flota.placa": {
-                            "$regex": placa, "$options": "i"
-                        } if placa else {"$exists": True}
+                    "$addFields": {
+                        "placa_normalizada": {
+                            "$toUpper": {
+                                "$replaceAll": {
+                                    "input": { "$ifNull": ["$info_servicio.flota.placa", "SIN_PLACA"] },
+                                    "find": "-",
+                                    "replacement": ""
+                                }
+                            }
+                        }
                     }
                 },
 
+                # 3. Filtro opcional por placa (sobre la placa normalizada)
+                {
+                    "$match": {
+                        "placa_normalizada": {
+                            "$regex": placa.replace("-", "").upper() if placa else "",
+                            "$options": "i"
+                        } if placa else {"$ne": ""}
+                    }
+                },
+
+                # 4. Agrupación por la placa normalizada
                 {
                     "$group": {
-                        "_id": "$info_servicio.flota.placa",
-                        "placa":             {"$first": "$info_servicio.flota.placa"},
-                        "vehiculo":          {"$first": "$info_servicio.flota.tipo_vehiculo"},
-                        "monto_total":       {"$sum": "$monto_flete"},
-                        "cantidad_fletes":   {"$sum": 1},
-                        "facturados":        {"$sum": {"$cond": ["$pertenece_a_factura", 1, 0]}},
-                        "pendientes":        {"$sum": {"$cond": ["$pertenece_a_factura", 0, 1]}},
-                        "monto_facturado":   {"$sum": {"$cond": ["$pertenece_a_factura", "$monto_flete", 0]}},
-                        "monto_pendiente":   {"$sum": {"$cond": ["$pertenece_a_factura", 0, "$monto_flete"]}},
+                        "_id": "$placa_normalizada",
+                        "placa": {"$first": "$placa_normalizada"}, # Mostramos la versión limpia
+                        "vehiculo": {"$first": {"$toLower": "$info_servicio.flota.tipo_vehiculo"}},
+                        "monto_total": {"$sum": "$monto_flete"},
+                        "cantidad_fletes": {"$sum": 1},
+                        "facturados": {"$sum": {"$cond": ["$pertenece_a_factura", 1, 0]}},
+                        "pendientes": {"$sum": {"$cond": ["$pertenece_a_factura", 0, 1]}},
+                        "monto_facturado": {"$sum": {"$cond": ["$pertenece_a_factura", "$monto_flete", 0]}},
+                        "monto_pendiente": {"$sum": {"$cond": ["$pertenece_a_factura", 0, "$monto_flete"]}},
                         "cliente_principal": {"$first": "$info_servicio.cliente.nombre"},
                     }
                 },
+
+                # 5. Formateo final
                 {
                     "$project": {
                         "_id": 0,
-                        "placa":           1,
-                        "vehiculo":        1,
+                        "placa": 1,
+                        "vehiculo": 1,
                         "cantidad_fletes": 1,
-                        "monto_total":     {"$round": ["$monto_total", 2]},
-                        "facturados":      1,
-                        "pendientes":      1,
+                        "monto_total": {"$round": ["$monto_total", 2]},
+                        "facturados": 1,
+                        "pendientes": 1,
                         "monto_facturado": {"$round": ["$monto_facturado", 2]},
                         "monto_pendiente": {"$round": ["$monto_pendiente", 2]},
                         "cliente_principal": 1,
