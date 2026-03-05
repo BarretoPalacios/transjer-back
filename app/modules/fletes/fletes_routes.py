@@ -228,6 +228,7 @@ def exportar_fletes_excel(
     estado: Optional[str] = Query(None),
     pertenece_a_factura: Optional[bool] = Query(None),
     cliente_nombre:Optional[str] = Query(None),
+    placa:Optional[str] = Query(None),
     fecha_servicio_desde: Optional[datetime] = Query(None),
     fecha_servicio_hasta: Optional[datetime] = Query(None)
 ):
@@ -239,6 +240,7 @@ def exportar_fletes_excel(
             "estado_flete": estado, 
             "pertenece_a_factura": pertenece_a_factura,
             "cliente_nombre": cliente_nombre,
+            "placa":placa,
             "fecha_servicio_desde": fecha_servicio_desde,
             "fecha_servicio_hasta": fecha_servicio_hasta
             

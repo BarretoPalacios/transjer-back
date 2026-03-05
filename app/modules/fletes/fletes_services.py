@@ -549,6 +549,7 @@ class FleteService:
                         query = filter_params.copy()
                 
                 cliente_a_filtrar = query.pop("cliente_nombre", None)
+                placa_a_filtrar = query.pop("placa", None)
                 fecha_desde = query.pop("fecha_servicio_desde", None)
                 fecha_hasta = query.pop("fecha_servicio_hasta", None)
                 
@@ -583,6 +584,14 @@ class FleteService:
                                 num_factura_real = factura_doc.get("numero_factura", factura_doc.get("codigo_factura", ""))
                         except Exception as e:
                             logger.warning(f"Error buscando factura {factura_id}: {str(e)}")
+                            
+                    placa_db = srv.get("flota", {}).get("placa", "")
+                    if placa_a_filtrar:
+                        # Normalizamos ambas para comparar (quitamos guiones y espacios)
+                        p_buscar = placa_a_filtrar.replace("-", "").replace(" ", "").lower()
+                        p_db = placa_db.replace("-", "").replace(" ", "").lower()
+                        if p_buscar not in p_db:
+                            continue
 
                     # --- LÓGICA DE FILTRADO MANUAL (SERVICIO) ---
                     nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")

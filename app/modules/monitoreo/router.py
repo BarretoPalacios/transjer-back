@@ -48,7 +48,7 @@ def buscar_fletes_avanzado(
     try:
         
         
-        result = service.get_fletes_and_metrics(
+        result = service.get_fletes_and_metrics_for_placas(
             # Filtros de Flete
             codigo_flete=codigo_flete,
             estado_flete=estado_flete,
@@ -81,3 +81,4 @@ def buscar_fletes_avanzado(
     except Exception as e:
         logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
