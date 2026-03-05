@@ -15,100 +15,69 @@ def get_monitoreo_service():
     return MonitoreoGerencia(db)
 
 
-@router.get("/fletes")
-def get_fletes_por_placa(
-    placa: Optional[str] = Query(None, description="Placa del vehículo. Si no se pasa, trae todas las placas"),
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
-    page: int = Query(1, ge=1, description="Página"),
-    page_size: int = Query(50, ge=1, le=200, description="Registros por página"),
-    service: MonitoreoGerencia = Depends(get_monitoreo_service)
+@router.get("/placas")
+def buscar_fletes_avanzado(
+    service: MonitoreoGerencia = Depends(get_monitoreo_service),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    
+    # Filtros de Flete
+    codigo_flete: Optional[str] = Query(None, description="Código del flete"),
+    estado_flete: Optional[str] = Query(None, description="Estado: PENDIENTE, VALORIZADO, etc."),
+    pertenece_a_factura: Optional[bool] = Query(None, description="Si está facturado o no"),
+    codigo_factura: Optional[str] = Query(None, description="Código de factura asociada"),
+    monto_min: Optional[float] = Query(None, description="Monto mínimo del flete"),
+    monto_max: Optional[float] = Query(None, description="Monto máximo del flete"),
+    
+    # Filtros del Servicio asociado
+    cliente: Optional[str] = Query(None, description="Nombre del cliente o razón social"),
+    placa: Optional[str] = Query(None, description="Placa del vehículo"),
+    conductor: Optional[str] = Query(None, description="Nombre del conductor"),
+    tipo_servicio: Optional[str] = Query(None, description="Tipo: REGULAR, URGENTE, etc."),
+    zona: Optional[str] = Query(None, description="Zona: LIMA, CALLAO, etc."),
+    estado_servicio: Optional[str] = Query(None, description="Estado del servicio: Completado, Programado, etc."),
+    
+    # Filtros de Fecha del Servicio
+    fecha_servicio_desde: Optional[datetime] = Query(None, description="Fecha de servicio desde (ISO format)"),
+    fecha_servicio_hasta: Optional[datetime] = Query(None, description="Fecha de servicio hasta (ISO format)"),
+    
+    # Filtros de Fecha del Flete
+    fecha_creacion_desde: Optional[datetime] = Query(None, description="Fecha de creación del flete desde"),
+    fecha_creacion_hasta: Optional[datetime] = Query(None, description="Fecha de creación del flete hasta")
 ):
-    """
-    Listado paginado de fletes filtrado por placa y/o rango de fechas.
-    """
     try:
-        return service.facturacion_de_placas(
+        
+        
+        result = service.get_fletes_and_metrics(
+            # Filtros de Flete
+            codigo_flete=codigo_flete,
+            estado_flete=estado_flete,
+            pertenece_a_factura=pertenece_a_factura,
+            codigo_factura=codigo_factura,
+            monto_min=monto_min,
+            monto_max=monto_max,
+            
+            # Filtros del Servicio
+            cliente=cliente,
             placa=placa,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            page=page,
-            page_size=page_size
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error en get_fletes_por_placa: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-
-
-@router.get("/metricas")
-def get_metricas(
-    placa: Optional[str] = Query(None, description="Placa del vehículo. Si no se pasa, calcula todas las placas"),
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
-    service: MonitoreoGerencia = Depends(get_monitoreo_service)
-):
-    """
-    Métricas agregadas: montos, estados, facturación, desglose por mes y tipo servicio.
-    """
-    try:
-        return service.get_metricas_placa(
-            placa=placa,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error en get_metricas: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-
-
-@router.get("/reporte-completo")
-def get_reporte_completo(
-    placa: Optional[str] = Query(None, description="Placa del vehículo. Si no se pasa, calcula todas las placas"),
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
-    page: int = Query(1, ge=1, description="Página"),
-    page_size: int = Query(50, ge=1, le=200, description="Registros por página"),
-    service: MonitoreoGerencia = Depends(get_monitoreo_service)
-):
-    """
-    Reporte completo: métricas agregadas + listado paginado de fletes.
-    """
-    try:
-        return service.get_reporte_completo(
-            placa=placa,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            page=page,
-            page_size=page_size
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error en get_reporte_completo: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-
-@router.get("/get_reporte_pendientes_por_placa")
-def get_reporte_pendientes_por_placa(
-    placa: Optional[str] = Query(None, description="Placa del vehículo. Si no se pasa, calcula todas las placas"),
-    fecha_servicio_desde: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_servicio_hasta: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
-    service: MonitoreoGerencia = Depends(get_monitoreo_service)
-):
-    """
-    Reporte de fletes pendientes por placa.
-    """
-    try:
-        return service.get_reporte_pendientes_por_placa(
-            placa=placa,
+            conductor=conductor,
+            tipo_servicio=tipo_servicio,
+            zona=zona,
+            estado_servicio=estado_servicio,
+            
+            # Filtros de Fecha
             fecha_servicio_desde=fecha_servicio_desde,
-            fecha_servicio_hasta=fecha_servicio_hasta
+            fecha_servicio_hasta=fecha_servicio_hasta,
+            fecha_creacion_desde=fecha_creacion_desde,
+            fecha_creacion_hasta=fecha_creacion_hasta,
+            
+            # Paginación
+            page=page,
+            page_size=page_size
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        
+        return result
+        
     except Exception as e:
-        logger.error(f"Error en get_reporte_pendientes_por_placa: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
