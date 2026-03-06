@@ -101,3 +101,21 @@ def get_metrics_by_client(
         logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
+
+@router.get("/get_metrics_by_specific_plates")
+def get_metrics_by_specific_plates(
+    service: MonitoreoGerencia = Depends(get_monitoreo_service),
+    month: int = Query(default=1, ge=1),
+    year: int = Query(default=2026),
+):
+    try:
+        result = service.get_metrics_by_specific_plates(
+            month=month,
+            year=year
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
