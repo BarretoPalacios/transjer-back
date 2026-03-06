@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 from math import ceil
 import re
+import calendar
 
 class MonitoreoGerencia:
     def __init__(self, db):
@@ -202,4 +203,79 @@ class MonitoreoGerencia:
             print(f"Error: {str(e)}")
             raise
 
-    
+
+    def get_metrics_by_client(self, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+        try:
+            pipeline = []
+
+            # 1. Unimos con la colección de servicios primero
+            pipeline.append({
+                "$lookup": {
+                    "from": "servicio_principal",
+                    "let": {"sid": "$servicio_id"},
+                    "pipeline": [
+                        {"$match": {"$expr": {"$eq": ["$_id", {"$toObjectId": "$$sid"}]}}}
+                    ],
+                    "as": "srv"
+                }
+            })
+            pipeline.append({"$unwind": "$srv"})
+
+            # 2. Filtro por Fecha de Servicio (dentro del objeto srv)
+            if month and year:
+                start_date = datetime(year, month, 1)
+                last_day = calendar.monthrange(year, month)[1]
+                end_date = datetime(year, month, last_day, 23, 59, 59)
+                
+                pipeline.append({
+                    "$match": {
+                        "srv.fecha_servicio": {"$gte": start_date, "$lte": end_date}
+                    }
+                })
+
+            # 3. Agrupación por Cliente
+            pipeline.append({
+                "$group": {
+                    "_id": "$srv.cliente.nombre",
+                    "cantidad_fletes": {"$sum": 1},
+                    "monto_total": {"$sum": "$monto_flete"},
+                    "fletes_pendientes": {
+                        "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}
+                    },
+                    "fletes_facturados": {
+                        "$sum": {"$cond": [{"$eq": ["$pertenece_a_factura", True]}, 1, 0]}
+                    }
+                }
+            })
+
+            # 4. Formateo de resultados
+            results = list(self.collection.aggregate(pipeline))
+            
+            metrics_per_client = []
+            total_global_monto = 0
+            total_global_fletes = 0
+
+            for res in results:
+                monto = round(float(res["monto_total"]), 2)
+                metrics_per_client.append({
+                    "cliente": res["_id"] or "Sin Nombre",
+                    "total_fletes": res["cantidad_fletes"],
+                    "monto_total": monto,
+                    "pendientes": res["fletes_pendientes"],
+                    "facturados": res["fletes_facturados"]
+                })
+                total_global_monto += monto
+                total_global_fletes += res["cantidad_fletes"]
+
+            return {
+                "periodo": f"{month}/{year}" if month else "Consolidado Histórico",
+                "resumen": {
+                    "monto_total_periodo": round(total_global_monto, 2),
+                    "cantidad_total_fletes": total_global_fletes
+                },
+                "detalle_clientes": metrics_per_client
+            }
+
+        except Exception as e:
+            print(f"Error en métricas: {str(e)}")
+            raise
