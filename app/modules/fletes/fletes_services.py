@@ -182,219 +182,209 @@ class FleteService:
             raise
 
     def get_fletes_advanced(
-        self,
-        # Filtros de Flete
-        codigo_flete: Optional[str] = None,
-        estado_flete: Optional[str] = None,
-        pertenece_a_factura: Optional[bool] = None,
-        codigo_factura: Optional[str] = None,
-        monto_min: Optional[float] = None,
-        monto_max: Optional[float] = None,
-        
-        # Filtros del Servicio asociado
-        cliente: Optional[str] = None,  # Nombre del cliente
-        placa: Optional[str] = None,  # Placa del vehículo
-        conductor: Optional[str] = None,  # Nombre del conductor
-        tipo_servicio: Optional[str] = None,  # REGULAR, etc.
-        zona: Optional[str] = None,  # LIMA, etc.
-        estado_servicio: Optional[str] = None,  # Completado, Programado, etc.
-        
-        # Filtros de Fecha del Servicio
-        fecha_servicio_desde: Optional[datetime] = None,
-        fecha_servicio_hasta: Optional[datetime] = None,
-        
-        # Filtros de Fecha del Flete
-        fecha_creacion_desde: Optional[datetime] = None,
-        fecha_creacion_hasta: Optional[datetime] = None,
-        
-        # Paginación
-        page: int = 1,
-        page_size: int = 10
-    ) -> dict:
-        """
-        Obtener fletes con información del servicio asociado y filtros avanzados.
-        Utiliza agregación de MongoDB para hacer join con servicios.
-        """
-        try:
-            # Pipeline de agregación
-            pipeline = []
+            self,
+            # Filtros de Flete
+            codigo_flete: Optional[str] = None,
+            estado_flete: Optional[str] = None,
+            pertenece_a_factura: Optional[bool] = None,
+            codigo_factura: Optional[str] = None,
+            monto_min: Optional[float] = None,
+            monto_max: Optional[float] = None,
             
-            # 1. Filtros iniciales sobre fletes
-            match_flete = {}
+            # Filtros del Servicio asociado
+            cliente: Optional[str] = None,
+            placa: Optional[str] = None,
+            conductor: Optional[str] = None,
+            tipo_servicio: Optional[str] = None,
+            zona: Optional[str] = None,
+            estado_servicio: Optional[str] = None,
             
-            if codigo_flete:
-                match_flete["codigo_flete"] = safe_regex(codigo_flete)
+            # Filtros de Fecha del Servicio
+            fecha_servicio_desde: Optional[datetime] = None,
+            fecha_servicio_hasta: Optional[datetime] = None,
             
-            if estado_flete:
-                match_flete["estado_flete"] = estado_flete
+            # Filtros de Fecha del Flete
+            fecha_creacion_desde: Optional[datetime] = None,
+            fecha_creacion_hasta: Optional[datetime] = None,
             
-            if pertenece_a_factura is not None:
-                match_flete["pertenece_a_factura"] = pertenece_a_factura
-            
-            if codigo_factura:
-                match_flete["codigo_factura"] = safe_regex(codigo_factura)
-            
-            if monto_min is not None:
-                match_flete.setdefault("monto_flete", {})["$gte"] = monto_min
-            
-            if monto_max is not None:
-                match_flete.setdefault("monto_flete", {})["$lte"] = monto_max
-            
-            if fecha_creacion_desde:
-                match_flete.setdefault("fecha_creacion", {})["$gte"] = fecha_creacion_desde
-            
-            if fecha_creacion_hasta:
-                match_flete.setdefault("fecha_creacion", {})["$lte"] = fecha_creacion_hasta
-            
-            if match_flete:
-                pipeline.append({"$match": match_flete})
-            
-            # 2. Lookup para unir con servicios
-            pipeline.append({
-                "$lookup": {
-                    "from": "servicio_principal",
-                    "let": {"servicio_id_str": "$servicio_id"},
-                    "pipeline": [
-                        {
-                            "$addFields": {
-                                "servicio_id_str": {"$toString": "$_id"}
+            # Paginación
+            page: int = 1,
+            page_size: int = 10
+        ) -> dict:
+            try:
+                # Pipeline de agregación
+                pipeline = []
+                
+                # 1. Filtros iniciales sobre fletes
+                match_flete = {}
+                if codigo_flete: match_flete["codigo_flete"] = safe_regex(codigo_flete)
+                if estado_flete: match_flete["estado_flete"] = estado_flete
+                if pertenece_a_factura is not None: match_flete["pertenece_a_factura"] = pertenece_a_factura
+                if codigo_factura: match_flete["codigo_factura"] = safe_regex(codigo_factura)
+                if monto_min is not None: match_flete.setdefault("monto_flete", {})["$gte"] = monto_min
+                if monto_max is not None: match_flete.setdefault("monto_flete", {})["$lte"] = monto_max
+                if fecha_creacion_desde: match_flete.setdefault("fecha_creacion", {})["$gte"] = fecha_creacion_desde
+                if fecha_creacion_hasta: match_flete.setdefault("fecha_creacion", {})["$lte"] = fecha_creacion_hasta
+                
+                if match_flete:
+                    pipeline.append({"$match": match_flete})
+                
+                # 2. Lookup para unir con servicios
+                pipeline.append({
+                    "$lookup": {
+                        "from": "servicio_principal",
+                        "let": {"servicio_id_str": "$servicio_id"},
+                        "pipeline": [
+                            {
+                                "$addFields": {
+                                    "servicio_id_str": {"$toString": "$_id"}
+                                }
+                            },
+                            {
+                                "$match": {
+                                    "$expr": {"$eq": ["$servicio_id_str", "$$servicio_id_str"]}
+                                }
                             }
+                        ],
+                        "as": "servicio"
+                    }
+                })
+                
+                # 3. Desempaquetar el servicio
+                pipeline.append({
+                    "$unwind": {
+                        "path": "$servicio",
+                        "preserveNullAndEmptyArrays": True
+                    }
+                })
+                
+                # 4. Filtros sobre el servicio asociado
+                match_servicio = {}
+                if cliente:
+                    match_servicio["$or"] = [
+                        {"servicio.cliente.nombre": safe_regex(cliente)},
+                        {"servicio.cliente.razon_social": safe_regex(cliente)},
+                        {"servicio.cuenta.nombre": safe_regex(cliente)}
+                    ]
+                if placa: match_servicio["servicio.flota.placa"] = safe_regex(placa)
+                if conductor:
+                    match_servicio["$or"] = [
+                        {"servicio.conductor.nombres_completos": safe_regex(conductor)},
+                        {"servicio.conductor.nombre": safe_regex(conductor)},
+                        {"servicio.cuenta.nombre_conductor": safe_regex(conductor)}
+                    ]
+                if tipo_servicio: match_servicio["servicio.tipo_servicio"] = tipo_servicio
+                if zona: match_servicio["servicio.zona"] = safe_regex(zona)
+                if estado_servicio: match_servicio["servicio.estado"] = estado_servicio
+                if fecha_servicio_desde:
+                    desde = fecha_servicio_desde.replace(hour=0, minute=0, second=0, microsecond=0)
+                    match_servicio.setdefault("servicio.fecha_servicio", {})["$gte"] = desde
+                if fecha_servicio_hasta:
+                    hasta = fecha_servicio_hasta.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    match_servicio.setdefault("servicio.fecha_servicio", {})["$lte"] = hasta
+                
+                if match_servicio:
+                    pipeline.append({"$match": match_servicio})
+                
+                # --- NUEVA LÓGICA DE STATS ---
+                stats_pipeline = pipeline.copy()
+                stats_pipeline.append({
+                    "$group": {
+                        "_id": None,
+                        "total": {"$sum": 1},
+                        "monto_total": {"$sum": "$monto_flete"},
+                        "pendientes": {
+                            "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}
                         },
-                        {
-                            "$match": {
-                                "$expr": {"$eq": ["$servicio_id_str", "$$servicio_id_str"]}
-                            }
+                        "valorizados_con_factura": {
+                            "$sum": {"$cond": [{"$eq": ["$pertenece_a_factura", True]}, 1, 0]}
+                        },
+                        "valorizados_sin_factura": {
+                            "$sum": {"$cond": [{"$eq": ["$pertenece_a_factura", False]}, 1, 0]}
                         }
-                    ],
-                    "as": "servicio"
+                    }
+                })
+                
+                stats_result = list(self.collection.aggregate(stats_pipeline))
+                stats = stats_result[0] if stats_result else {
+                    "total": 0, "monto_total": 0, "pendientes": 0, 
+                    "valorizados_con_factura": 0, "valorizados_sin_factura": 0
                 }
-            })
-            
-            # 3. Desempaquetar el servicio (convertir array a objeto)
-            pipeline.append({
-                "$unwind": {
-                    "path": "$servicio",
-                    "preserveNullAndEmptyArrays": True
-                }
-            })
-            
-            # 4. Filtros sobre el servicio asociado
-            match_servicio = {}
-            
-            if cliente:
-                match_servicio["$or"] = [
-                    {"servicio.cliente.nombre": safe_regex(cliente)},
-                    {"servicio.cliente.razon_social": safe_regex(cliente)},
-                    {"servicio.cuenta.nombre": safe_regex(cliente)}
-                ]
-            
-            if placa:
-                match_servicio["servicio.flota.placa"] = safe_regex(placa)
-            
-            if conductor:
-                match_servicio["$or"] = [
-                    {"servicio.conductor.nombres_completos": safe_regex(conductor)},
-                    {"servicio.conductor.nombre": safe_regex(conductor)},
-                    {"servicio.cuenta.nombre_conductor": safe_regex(conductor)}
-                ]
-            
-            if tipo_servicio:
-                match_servicio["servicio.tipo_servicio"] = tipo_servicio
-            
-            if zona:
-                match_servicio["servicio.zona"] = safe_regex(zona)
-            
-            if estado_servicio:
-                match_servicio["servicio.estado"] = estado_servicio
-            
-            if fecha_servicio_desde:
-                # Forzar inicio del día
-                desde = fecha_servicio_desde.replace(hour=0, minute=0, second=0, microsecond=0)
-                match_servicio.setdefault("servicio.fecha_servicio", {})["$gte"] = desde
+                # -----------------------------
 
-            if fecha_servicio_hasta:
-                # Forzar fin del día
-                hasta = fecha_servicio_hasta.replace(hour=23, minute=59, second=59, microsecond=999999)
-                match_servicio.setdefault("servicio.fecha_servicio", {})["$lte"] = hasta
-            
-            if match_servicio:
-                pipeline.append({"$match": match_servicio})
-            
-            # 5. Contar total de documentos
-            count_pipeline = pipeline.copy()
-            count_pipeline.append({"$count": "total"})
-            
-            count_result = list(self.collection.aggregate(count_pipeline))
-            total = count_result[0]["total"] if count_result else 0
-            
-            # 6. Ordenar, paginar y proyectar
-            pipeline.append({"$sort": {"_id": -1}})
-            
-            skip = (page - 1) * page_size
-            pipeline.append({"$skip": skip})
-            pipeline.append({"$limit": page_size})
-            
-            # 7. Proyección final para limpiar el resultado
-            pipeline.append({
-                "$project": {
-                    "id": {"$toString": "$_id"},
-                    "codigo_flete": 1,
-                    "servicio_id": 1,
-                    "codigo_servicio": 1,
-                    "estado_flete": 1,
-                    "monto_flete": 1,
-                    "pertenece_a_factura": 1,
-                    "factura_id": 1,
-                    "codigo_factura": 1,
-                    "fecha_pago": 1,
-                    "observaciones": 1,
-                    "fecha_creacion": 1,
-                    "fecha_actualizacion": 1,
-                    "usuario_creador": 1,
-                    "servicio": {
-                        "id": {"$toString": "$servicio._id"},
-                        "codigo_servicio_principal": "$servicio.codigo_servicio_principal",
-                        "tipo_servicio": "$servicio.tipo_servicio",
-                        "modalidad_servicio": "$servicio.modalidad_servicio",
-                        "zona": "$servicio.zona",
-                        "fecha_servicio": "$servicio.fecha_servicio",
-                        "fecha_salida": "$servicio.fecha_salida",
-                        "hora_cita": "$servicio.hora_cita",
-                        "estado": "$servicio.estado",
-                        "descripcion": "$servicio.descripcion",
-                        "origen": "$servicio.origen",
-                        "destino": "$servicio.destino",
-                        "m3": "$servicio.m3",
-                        "tn": "$servicio.tn",
-                        "cliente": "$servicio.cliente",
-                        "cuenta": "$servicio.cuenta",
-                        "proveedor": "$servicio.proveedor",
-                        "flota": "$servicio.flota",
-                        "conductor": "$servicio.conductor",
-                        "auxiliar": "$servicio.auxiliar"
+                # 6. Ordenar, paginar y proyectar
+                pipeline.append({"$sort": {"_id": -1}})
+                
+                skip = (page - 1) * page_size
+                pipeline.append({"$skip": skip})
+                pipeline.append({"$limit": page_size})
+                
+                # 7. Proyección final
+                pipeline.append({
+                    "$project": {
+                        "id": {"$toString": "$_id"},
+                        "codigo_flete": 1,
+                        "servicio_id": 1,
+                        "codigo_servicio": 1,
+                        "estado_flete": 1,
+                        "monto_flete": 1,
+                        "pertenece_a_factura": 1,
+                        "factura_id": 1,
+                        "codigo_factura": 1,
+                        "fecha_pago": 1,
+                        "observaciones": 1,
+                        "fecha_creacion": 1,
+                        "fecha_actualizacion": 1,
+                        "usuario_creador": 1,
+                        "servicio": {
+                            "id": {"$toString": "$servicio._id"},
+                            "codigo_servicio_principal": "$servicio.codigo_servicio_principal",
+                            "tipo_servicio": "$servicio.tipo_servicio",
+                            "modalidad_servicio": "$servicio.modalidad_servicio",
+                            "zona": "$servicio.zona",
+                            "fecha_servicio": "$servicio.fecha_servicio",
+                            "fecha_salida": "$servicio.fecha_salida",
+                            "hora_cita": "$servicio.hora_cita",
+                            "estado": "$servicio.estado",
+                            "descripcion": "$servicio.descripcion",
+                            "origen": "$servicio.origen",
+                            "destino": "$servicio.destino",
+                            "m3": "$servicio.m3",
+                            "tn": "$servicio.tn",
+                            "cliente": "$servicio.cliente",
+                            "cuenta": "$servicio.cuenta",
+                            "proveedor": "$servicio.proveedor",
+                            "flota": "$servicio.flota",
+                            "conductor": "$servicio.conductor",
+                            "auxiliar": "$servicio.auxiliar"
+                        },
+                        "_id": 0
+                    }
+                })
+                
+                fletes = list(self.collection.aggregate(pipeline))
+                total = stats.get("total", 0)
+                total_pages = ceil(total / page_size) if page_size > 0 else 0
+                
+                return {
+                    "items": fletes,
+                    "stats": {
+                        "monto_total": round(float(stats.get("monto_total", 0)), 2),
+                        "total_pendientes": stats.get("pendientes", 0),
+                        "valorizados_con_factura": stats.get("valorizados_con_factura", 0),
+                        "valorizados_sin_factura": stats.get("valorizados_sin_factura", 0),
                     },
-                    "_id": 0
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1
                 }
-            })
-            
-            # Ejecutar pipeline
-            fletes = list(self.collection.aggregate(pipeline))
-            
-            total_pages = ceil(total / page_size) if page_size > 0 else 0
-            
-            return {
-                "items": fletes,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_prev": page > 1
-            }
-            
-        except Exception as e:
-            logger.error(f"Error al obtener fletes avanzados: {str(e)}")
-            raise
+                
+            except Exception as e:
+                logger.error(f"Error al obtener fletes avanzados: {str(e)}")
+                raise
     
     def update_flete(self, flete_id: str, update_data: dict) -> Optional[dict]:
         try:
