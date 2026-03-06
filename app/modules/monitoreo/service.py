@@ -8,7 +8,7 @@ class MonitoreoGerencia:
         self.db = db
         self.collection = db["fletes"]
 
-    def get_fletes_and_metrics_for_placas(
+    def get_fletes_and_metrics(
         self,
         codigo_flete: Optional[str] = None,
         estado_flete: Optional[str] = None,
