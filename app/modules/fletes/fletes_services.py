@@ -539,6 +539,7 @@ class FleteService:
                         query = filter_params.copy()
                 
                 cliente_a_filtrar = query.pop("cliente_nombre", None)
+                proveedor_a_filtrar = query.pop("proveedor_nombre", None)
                 placa_a_filtrar = query.pop("placa", None)
                 fecha_desde = query.pop("fecha_servicio_desde", None)
                 fecha_hasta = query.pop("fecha_servicio_hasta", None)
@@ -587,6 +588,15 @@ class FleteService:
                     nombre_cliente_db = srv.get("cliente", {}).get("nombre", "")
                     if cliente_a_filtrar and cliente_a_filtrar.lower() not in nombre_cliente_db.lower():
                         continue
+
+                    if proveedor_a_filtrar:
+                        prov_obj = srv.get("proveedor", {})
+                        p_nom = str(prov_obj.get("nombre", "")).lower()
+                        p_rs = str(prov_obj.get("razon_social", "")).lower()
+                        busqueda = proveedor_a_filtrar.lower()
+                        
+                        if busqueda not in p_nom and busqueda not in p_rs:
+                            continue
 
                     f_srv = srv.get("fecha_servicio")
                     if isinstance(f_srv, dict) and "$date" in f_srv:

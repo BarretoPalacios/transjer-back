@@ -31,6 +31,7 @@ def buscar_fletes_avanzado(
     
     # Filtros del Servicio asociado
     cliente: Optional[str] = Query(None, description="Nombre del cliente o razón social"),
+    proveedor: Optional[str] = Query(None, description="Nombre del proveedor o razón social"),
     placa: Optional[str] = Query(None, description="Placa del vehículo"),
     conductor: Optional[str] = Query(None, description="Nombre del conductor"),
     tipo_servicio: Optional[str] = Query(None, description="Tipo: REGULAR, URGENTE, etc."),
@@ -59,6 +60,7 @@ def buscar_fletes_avanzado(
             
             # Filtros del Servicio
             cliente=cliente,
+            proveedor=proveedor,
             placa=placa,
             conductor=conductor,
             tipo_servicio=tipo_servicio,
@@ -110,6 +112,26 @@ def get_metrics_by_specific_plates(
 ):
     try:
         result = service.get_metrics_by_specific_plates(
+            month=month,
+            year=year
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
+
+
+@router.get("/get_metrics_by_provider")
+def get_metrics_by_provider(
+    service: MonitoreoGerencia = Depends(get_monitoreo_service),
+    month: int = Query(default=1, ge=1),
+    year: int = Query(default=2026),
+):
+    try:
+        result = service.get_metrics_by_provider(
             month=month,
             year=year
         )
