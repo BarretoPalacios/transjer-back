@@ -296,9 +296,23 @@ class MonitoreoGerencia:
         try:
             # Lista de placas permitidas (normalizada para comparar)
             placas_permitidas = [
-                "BVR-727", "CBB-773", "CAG-817", "CDM-793", "CDN-786", 
-                "CDQ-786", "CDQ-743", "BXS-909", "BYH-716", "C5Q-932", 
-                "D4D-838", "BZH-921", "BPF-700", "BJA-838", "F5F-264", "ARN-774"
+             "BNG-908",    
+            "BVR-727" ,
+            "CBB-773",
+            "CAG-817",
+            "CDM-793",
+            "CDN-786",
+            "CDQ-786",
+            "CDQ-743",
+            "BXS-909",
+            "BYH-716",
+            "C5Q-932",
+            "D4D-838",
+            "BZH-921",
+            "BPF-700",
+            "BJA-838",
+            "F5F-264",
+            "ARN-774"
             ]
             # Creamos una lista de placas sin guiones para filtrar en el pipeline
             placas_clean = [p.replace("-", "").upper() for p in placas_permitidas]

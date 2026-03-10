@@ -130,6 +130,7 @@ async def get_placas_list():
 async def get_placas_list():
     
     lista_estatica =  [
+    "BNG-908",    
     "BVR-727" ,
     "CBB-773",
     "CAG-817",
