@@ -88,13 +88,17 @@ def buscar_fletes_avanzado(
 @router.get("/get_metrics_by_client")
 def get_metrics_by_client(
     service: MonitoreoGerencia = Depends(get_monitoreo_service),
-    month: int = Query(default=1, ge=1),
-    year: int = Query(default=2026),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    year: Optional[int] = Query(None, ge=2000),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None)
 ):
     try:
         result = service.get_metrics_by_client(
             month=month,
-            year=year
+            year=year,
+            start_date=start_date,
+            end_date=end_date
         )
         
         return result
@@ -107,13 +111,17 @@ def get_metrics_by_client(
 @router.get("/get_metrics_by_specific_plates")
 def get_metrics_by_specific_plates(
     service: MonitoreoGerencia = Depends(get_monitoreo_service),
-    month: int = Query(default=1, ge=1),
-    year: int = Query(default=2026),
+   month: Optional[int] = Query(None, ge=1, le=12),
+    year: Optional[int] = Query(None, ge=2000),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None)
 ):
     try:
         result = service.get_metrics_by_specific_plates(
-            month=month,
-            year=year
+             month=month,
+            year=year,
+            start_date=start_date,
+            end_date=end_date
         )
         
         return result

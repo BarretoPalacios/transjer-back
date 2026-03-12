@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime,time
 from typing import Optional
 from math import ceil
 import re
@@ -216,11 +216,93 @@ class MonitoreoGerencia:
                 print(f"Error: {str(e)}")
                 raise
 
-    def get_metrics_by_client(self, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+    # def get_metrics_by_client(self, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+    #     try:
+    #         pipeline = []
+
+    #         # 1. Unimos con la colección de servicios primero
+    #         pipeline.append({
+    #             "$lookup": {
+    #                 "from": "servicio_principal",
+    #                 "let": {"sid": "$servicio_id"},
+    #                 "pipeline": [
+    #                     {"$match": {"$expr": {"$eq": ["$_id", {"$toObjectId": "$$sid"}]}}}
+    #                 ],
+    #                 "as": "srv"
+    #             }
+    #         })
+    #         pipeline.append({"$unwind": "$srv"})
+
+    #         # 2. Filtro por Fecha de Servicio (dentro del objeto srv)
+    #         if month and year:
+    #             start_date = datetime(year, month, 1)
+    #             last_day = calendar.monthrange(year, month)[1]
+    #             end_date = datetime(year, month, last_day, 23, 59, 59)
+                
+    #             pipeline.append({
+    #                 "$match": {
+    #                     "srv.fecha_servicio": {"$gte": start_date, "$lte": end_date}
+    #                 }
+    #             })
+
+    #         # 3. Agrupación por Cliente
+    #         pipeline.append({
+    #             "$group": {
+    #                 "_id": "$srv.cliente.nombre",
+    #                 "cantidad_fletes": {"$sum": 1},
+    #                 "monto_total": {"$sum": "$monto_flete"},
+    #                 "fletes_pendientes": {
+    #                     "$sum": {"$cond": [{"$eq": ["$estado_flete", "PENDIENTE"]}, 1, 0]}
+    #                 },
+    #                 "fletes_facturados": {
+    #                     "$sum": {"$cond": [{"$eq": ["$pertenece_a_factura", True]}, 1, 0]}
+    #                 }
+    #             }
+    #         })
+
+    #         # 4. Formateo de resultados
+    #         results = list(self.collection.aggregate(pipeline))
+            
+    #         metrics_per_client = []
+    #         total_global_monto = 0
+    #         total_global_fletes = 0
+
+    #         for res in results:
+    #             monto = round(float(res["monto_total"]), 2)
+    #             metrics_per_client.append({
+    #                 "cliente": res["_id"] or "Sin Nombre",
+    #                 "total_fletes": res["cantidad_fletes"],
+    #                 "monto_total": monto,
+    #                 "pendientes": res["fletes_pendientes"],
+    #                 "facturados": res["fletes_facturados"]
+    #             })
+    #             total_global_monto += monto
+    #             total_global_fletes += res["cantidad_fletes"]
+
+    #         return {
+    #             "periodo": f"{month}/{year}" if month else "Consolidado Histórico",
+    #             "resumen": {
+    #                 "monto_total_periodo": round(total_global_monto, 2),
+    #                 "cantidad_total_fletes": total_global_fletes
+    #             },
+    #             "detalle_clientes": metrics_per_client
+    #         }
+
+    #     except Exception as e:
+    #         print(f"Error en métricas: {str(e)}")
+    #         raise
+
+    def get_metrics_by_client(
+        self, 
+        month: Optional[int] = None, 
+        year: Optional[int] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> dict:
         try:
             pipeline = []
 
-            # 1. Unimos con la colección de servicios primero
+            # 1. Unimos con la colección de servicios
             pipeline.append({
                 "$lookup": {
                     "from": "servicio_principal",
@@ -233,15 +315,29 @@ class MonitoreoGerencia:
             })
             pipeline.append({"$unwind": "$srv"})
 
-            # 2. Filtro por Fecha de Servicio (dentro del objeto srv)
-            if month and year:
-                start_date = datetime(year, month, 1)
+            # 2. Lógica de filtrado de fechas
+            filter_start = None
+            filter_end = None
+
+            if start_date and end_date:
+                # Prioridad: Rango explícito
+                filter_start = datetime.combine(start_date, time.min)
+                filter_end = datetime.combine(end_date, time.max)
+                period_label = f"{filter_start.strftime('%d/%m/%Y')} - {filter_end.strftime('%d/%m/%Y')}"
+            elif month and year:
+                # Opción B: Mes y año
+                filter_start = datetime(year, month, 1)
                 last_day = calendar.monthrange(year, month)[1]
-                end_date = datetime(year, month, last_day, 23, 59, 59)
-                
+                filter_end = datetime(year, month, last_day, 23, 59, 59)
+                period_label = f"{month}/{year}"
+            else:
+                period_label = "Consolidado Histórico"
+
+            # Aplicar el match si existe un rango definido
+            if filter_start and filter_end:
                 pipeline.append({
                     "$match": {
-                        "srv.fecha_servicio": {"$gte": start_date, "$lte": end_date}
+                        "srv.fecha_servicio": {"$gte": filter_start, "$lte": filter_end}
                     }
                 })
 
@@ -268,7 +364,7 @@ class MonitoreoGerencia:
             total_global_fletes = 0
 
             for res in results:
-                monto = round(float(res["monto_total"]), 2)
+                monto = round(float(res.get("monto_total", 0)), 2)
                 metrics_per_client.append({
                     "cliente": res["_id"] or "Sin Nombre",
                     "total_fletes": res["cantidad_fletes"],
@@ -280,7 +376,7 @@ class MonitoreoGerencia:
                 total_global_fletes += res["cantidad_fletes"]
 
             return {
-                "periodo": f"{month}/{year}" if month else "Consolidado Histórico",
+                "periodo": period_label,
                 "resumen": {
                     "monto_total_periodo": round(total_global_monto, 2),
                     "cantidad_total_fletes": total_global_fletes
@@ -292,34 +388,128 @@ class MonitoreoGerencia:
             print(f"Error en métricas: {str(e)}")
             raise
 
-    def get_metrics_by_specific_plates(self, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+    # def get_metrics_by_specific_plates(self, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+    #     try:
+    #         # Lista de placas permitidas (normalizada para comparar)
+    #         placas_permitidas = [
+    #          "BNG-908",    
+    #         "BVR-727" ,
+    #         "CBB-773",
+    #         "CAG-817",
+    #         "CDM-793",
+    #         "CDN-786",
+    #         "CDQ-786",
+    #         "CDQ-743",
+    #         "BXS-909",
+    #         "BYH-716",
+    #         "C5Q-932",
+    #         "D4D-838",
+    #         "BZH-921",
+    #         "BPF-700",
+    #         "BJA-838",
+    #         "F5F-264",
+    #         "ARN-774"
+    #         ]
+    #         # Creamos una lista de placas sin guiones para filtrar en el pipeline
+    #         placas_clean = [p.replace("-", "").upper() for p in placas_permitidas]
+
+    #         pipeline = []
+
+    #         # 1. Join con servicios
+    #         pipeline.append({
+    #             "$lookup": {
+    #                 "from": "servicio_principal",
+    #                 "let": {"sid": "$servicio_id"},
+    #                 "pipeline": [
+    #                     {"$match": {"$expr": {"$eq": ["$_id", {"$toObjectId": "$$sid"}]}}}
+    #                 ],
+    #                 "as": "srv"
+    #             }
+    #         })
+    #         pipeline.append({"$unwind": "$srv"})
+
+    #         # 2. Normalización de Placa (quitar guiones) y Filtro de Fecha
+    #         # Creamos un campo temporal 'placa_normalizada'
+    #         pipeline.append({
+    #             "$addFields": {
+    #                 "placa_normalizada": {
+    #                     "$replaceOne": {
+    #                         "input": {"$toUpper": "$srv.flota.placa"},
+    #                         "find": "-",
+    #                         "replacement": ""
+    #                     }
+    #                 }
+    #             }
+    #         })
+
+    #         match_stage = {}
+    #         # Filtro por el grupo específico de placas
+    #         match_stage["placa_normalizada"] = {"$in": placas_clean}
+
+    #         # Filtro por Fecha de Servicio
+    #         if month and year:
+    #             import calendar
+    #             start_date = datetime(year, month, 1)
+    #             last_day = calendar.monthrange(year, month)[1]
+    #             end_date = datetime(year, month, last_day, 23, 59, 59)
+    #             match_stage["srv.fecha_servicio"] = {"$gte": start_date, "$lte": end_date}
+
+    #         pipeline.append({"$match": match_stage})
+
+    #         # 3. Agrupación por Placa Normalizada
+    #         pipeline.append({
+    #             "$group": {
+    #                 "_id": "$placa_normalizada",
+    #                 "cantidad_fletes": {"$sum": 1},
+    #                 "monto_total": {"$sum": "$monto_flete"}
+    #             }
+    #         })
+
+    #         # 4. Formateo Final para devolver con el guion original (opcional)
+    #         results = list(self.collection.aggregate(pipeline))
+            
+    #         # Mapeo para volver a poner el guion según tu lista original
+    #         map_guiones = {p.replace("-", ""): p for p in placas_permitidas}
+            
+    #         metrics = []
+    #         for res in results:
+    #             placa_key = res["_id"]
+    #             metrics.append({
+    #                 "placa": map_guiones.get(placa_key, placa_key), # Devuelve ABC-123
+    #                 "cantidad_fletes": res["cantidad_fletes"],
+    #                 "monto_total": round(float(res["monto_total"]), 2)
+    #             })
+
+    #         return {
+    #             "periodo": f"{month}/{year}" if month else "Total Histórico",
+    #             "grupo": "Flota Específica",
+    #             "detalle": sorted(metrics, key=lambda x: x['monto_total'], reverse=True)
+    #         }
+
+    #     except Exception as e:
+    #         print(f"Error en métricas de flota específica: {str(e)}")
+    #         raise
+
+    def get_metrics_by_specific_plates(
+        self, 
+        month: Optional[int] = None, 
+        year: Optional[int] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> dict:
         try:
-            # Lista de placas permitidas (normalizada para comparar)
+            # 1. Configuración de Placas Permitidas
             placas_permitidas = [
-             "BNG-908",    
-            "BVR-727" ,
-            "CBB-773",
-            "CAG-817",
-            "CDM-793",
-            "CDN-786",
-            "CDQ-786",
-            "CDQ-743",
-            "BXS-909",
-            "BYH-716",
-            "C5Q-932",
-            "D4D-838",
-            "BZH-921",
-            "BPF-700",
-            "BJA-838",
-            "F5F-264",
-            "ARN-774"
+                "BNG-908", "BVR-727", "CBB-773", "CAG-817", "CDM-793",
+                "CDN-786", "CDQ-786", "CDQ-743", "BXS-909", "BYH-716",
+                "C5Q-932", "D4D-838", "BZH-921", "BPF-700", "BJA-838",
+                "F5F-264", "ARN-774"
             ]
-            # Creamos una lista de placas sin guiones para filtrar en el pipeline
             placas_clean = [p.replace("-", "").upper() for p in placas_permitidas]
 
             pipeline = []
 
-            # 1. Join con servicios
+            # 2. Join con servicios
             pipeline.append({
                 "$lookup": {
                     "from": "servicio_principal",
@@ -332,8 +522,7 @@ class MonitoreoGerencia:
             })
             pipeline.append({"$unwind": "$srv"})
 
-            # 2. Normalización de Placa (quitar guiones) y Filtro de Fecha
-            # Creamos un campo temporal 'placa_normalizada'
+            # 3. Normalización de Placa (quitar guiones para comparar)
             pipeline.append({
                 "$addFields": {
                     "placa_normalizada": {
@@ -346,21 +535,30 @@ class MonitoreoGerencia:
                 }
             })
 
-            match_stage = {}
-            # Filtro por el grupo específico de placas
-            match_stage["placa_normalizada"] = {"$in": placas_clean}
+            # 4. Lógica de Filtrado (Placas + Fechas)
+            match_stage = {"placa_normalizada": {"$in": placas_clean}}
+            
+            filter_start = None
+            filter_end = None
 
-            # Filtro por Fecha de Servicio
-            if month and year:
-                import calendar
-                start_date = datetime(year, month, 1)
+            if start_date and end_date:
+                filter_start = datetime.combine(start_date, time.min)
+                filter_end = datetime.combine(end_date, time.max)
+                period_label = f"{filter_start.strftime('%d/%m/%Y')} - {filter_end.strftime('%d/%m/%Y')}"
+            elif month and year:
+                filter_start = datetime(year, month, 1)
                 last_day = calendar.monthrange(year, month)[1]
-                end_date = datetime(year, month, last_day, 23, 59, 59)
-                match_stage["srv.fecha_servicio"] = {"$gte": start_date, "$lte": end_date}
+                filter_end = datetime(year, month, last_day, 23, 59, 59)
+                period_label = f"{month}/{year}"
+            else:
+                period_label = "Total Histórico"
+
+            if filter_start and filter_end:
+                match_stage["srv.fecha_servicio"] = {"$gte": filter_start, "$lte": filter_end}
 
             pipeline.append({"$match": match_stage})
 
-            # 3. Agrupación por Placa Normalizada
+            # 5. Agrupación
             pipeline.append({
                 "$group": {
                     "_id": "$placa_normalizada",
@@ -369,23 +567,21 @@ class MonitoreoGerencia:
                 }
             })
 
-            # 4. Formateo Final para devolver con el guion original (opcional)
+            # 6. Formateo Final
             results = list(self.collection.aggregate(pipeline))
-            
-            # Mapeo para volver a poner el guion según tu lista original
             map_guiones = {p.replace("-", ""): p for p in placas_permitidas}
             
             metrics = []
             for res in results:
                 placa_key = res["_id"]
                 metrics.append({
-                    "placa": map_guiones.get(placa_key, placa_key), # Devuelve ABC-123
+                    "placa": map_guiones.get(placa_key, placa_key),
                     "cantidad_fletes": res["cantidad_fletes"],
-                    "monto_total": round(float(res["monto_total"]), 2)
+                    "monto_total": round(float(res.get("monto_total", 0)), 2)
                 })
 
             return {
-                "periodo": f"{month}/{year}" if month else "Total Histórico",
+                "periodo": period_label,
                 "grupo": "Flota Específica",
                 "detalle": sorted(metrics, key=lambda x: x['monto_total'], reverse=True)
             }
