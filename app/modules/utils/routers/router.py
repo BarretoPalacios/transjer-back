@@ -41,27 +41,13 @@ async def consultar_ruc(ruc: str):
 
 @router.get("/clientes-list")
 async def get_razones_sociales():
-    # 1. Lista estática solicitada
-    lista_estatica = [
-        "OECHSLE", "SONEPAR", "CALERA", "ALICORP", "INFINIA", 
-        "BOX PERU", "GYG VENTILACION", "AMAUTA", "BASA", 
-        "CLOUDATEL", "LINKSOLUTIONS"
-    ]
 
-    # Conexión a la base de datos
     db = get_database()
     colecc = db["clientes"]
-    
-    # 2. Traer solo los valores únicos del campo 'razon_social' de la DB
-    # Usamos distinct para no traer documentos enteros y saturar la memoria
+
     razones_db = colecc.distinct("razon_social")
-    
-    # 3. Unir listas, eliminar duplicados con set() y limpiar posibles nulos
-    # El set se encarga de que si "ALICORP" está en ambos, solo aparezca una vez
-    combinada = set(lista_estatica) | {r for r in razones_db if r}
-    
-    # 4. Retornar lista ordenada alfabéticamente
-    return sorted(list(combinada))
+
+    return sorted(list(razones_db))
     
 @router.get("/proveedores-list")
 async def get_proveedores_list():
