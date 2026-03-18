@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import Optional
 from datetime import datetime
 from app.core.database import get_database
@@ -18,6 +18,7 @@ def get_monitoreo_service():
 @router.get("/fletes")
 def buscar_fletes_avanzado(
     service: MonitoreoGerencia = Depends(get_monitoreo_service),
+    solo_con_inversion: Optional[bool] = Query(None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     
@@ -75,7 +76,8 @@ def buscar_fletes_avanzado(
             
             # Paginación
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            solo_con_inversion=solo_con_inversion
         )
         
         return result
@@ -149,3 +151,33 @@ def get_metrics_by_provider(
     except Exception as e:
         logger.error(f"Error en búsqueda avanzada de fletes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
+
+@router.post("/registrar_gasto_inversion")
+def registrar_gasto_inversion(
+    flete_id: str = Body(...),
+    monto: float = Body(...),
+    service: MonitoreoGerencia = Depends(get_monitoreo_service)
+):
+    try:
+        nuevo_id = service.registrar_gasto_inversion(
+            flete_id=flete_id,
+            monto=monto
+        )
+        
+        return {
+            "status": "success",
+            "message": "Gasto de inversión registrado correctamente",
+            "inserted_id": nuevo_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error al registrar gasto de inversión: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error interno al procesar el gasto: {str(e)}"
+        )
+
+
+
+
