@@ -79,7 +79,7 @@ async def get_proveedores_list():
     combinada = set(lista_estatica) | {p for p in proveedores_db if p}
     
     # 4. Retornar lista ordenada alfabéticamente
-    return sorted(list(combinada))
+    return sorted(list(proveedores_db))
 
 @router.get("/placas-list")
 async def get_placas_list():
